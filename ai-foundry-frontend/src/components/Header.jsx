@@ -43,7 +43,7 @@ const Header = () => {
           {/* Logo */}
           <motion.a
             href="#"
-            className="text-2xl font-bold text-gray-900 dark:text-white"
+            className="text-2xl font-bold text-gray-900"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             aria-label="MindStudio Home"
@@ -57,7 +57,7 @@ const Header = () => {
               <a
                 key={link.name}
                 href={link.href}
-                className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors duration-200 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded"
+                className="text-gray-700 hover:text-blue-600 transition-colors duration-200 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded"
                 aria-label={`Navigate to ${link.name} section`}
               >
                 {link.name}

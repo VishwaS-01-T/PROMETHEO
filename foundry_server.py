@@ -11,7 +11,7 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 import pprint
 from dotenv import load_dotenv
 
@@ -100,10 +100,13 @@ class CampaignState(BaseModel):
     landing_page_url: Optional[str] = None
     
     # --- 6. Filled by BRD_Agent ---
-    brd_url: Optional[str] = None # <-- NEW FIELD
+    brd_url: Optional[str] = None
     
-    # --- 7. Filled by Ops_Agent ---
-    automation_status: Dict[str, str] = {}
+    # --- 7. Filled by Strategy_Agent (MODIFIED) ---
+    strategy_markdown: Optional[str] = None # <-- CHANGED
+    
+    # --- 8. Filled by Ops_Agent ---
+    automation_status: Dict[str, Any] = {}  # Changed from Dict[str, str] to Dict[str, Any] to support complex data
     
     class Config:
         json_encoders = {
@@ -151,17 +154,6 @@ class ResearchOutput(BaseModel):
     core_messaging: Dict[str, str] = Field(description="A 3-key dictionary for the marketing strategy, with keys 'value_proposition', 'tone_of_voice', and 'call_to_action'.")
 
 research_parser = PydanticOutputParser(pydantic_object=ResearchOutput)
-
-def scrape_webpage(url: str) -> str:
-    """Scrapes a single webpage and returns its content."""
-    try:
-        loader = WebBaseLoader(url)
-        docs = loader.load()
-        return docs[0].page_content
-    except Exception as e:
-        print(f"--- ❌ ERROR scraping {url}: {e} ---")
-        return f"Error scraping {url}: {e}"
-
 tavily_tool = TavilySearch(max_results=3) 
 research_prompt = ChatPromptTemplate.from_messages(
     [
@@ -227,11 +219,8 @@ content_prompt = ChatPromptTemplate.from_messages(
             "\n\n--- TASK ---"
             "\nGenerate the following content based on the context provided:"
             "\n1. Webinar Details: A catchy title and a 2-3 sentence abstract."
-            "\n2. Social Posts: A list of *exactly 2* social media posts:"
-            "\n   - One post for 'Instagram'. (Content should be visual-first, engaging, with emojis and hashtags)."
-            "\n   - One post for 'X (Twitter)'. (Content should be short, punchy, and include a call-to-action)."
-            "\n   - For each post, provide the platform, the full text content, and a simple stock photo search query for the 'image_prompt'."
-            "\n3. Webinar Image Prompt: A simple stock photo search query for the main webinar banner (e.g., 'professional tech conference', 'abstract data')."
+            "\n2. Social Posts: A list of *exactly 2* social media posts..."
+            "\n3. Webinar Image Prompt: A simple stock photo search query for the main webinar banner..."
         ),
     ]
 ).partial(format_instructions=content_parser.get_format_instructions())
@@ -243,16 +232,8 @@ print("--- ✍️  Content Agent LCEL Chain Compiled ---")
 UNSPLASH_API_URL = "https://api.unsplash.com/search/photos"
 UNSPLASH_HEADERS = {"Authorization": f"Client-ID {_unsplash_key}"}
 def get_unsplash_image(search_query: str) -> str:
-    """
-    Calls the Unsplash API to get a stock photo and returns a URL.
-    """
     print(f"--- 🎨 Querying Unsplash for: '{search_query}' ---")
-    params = {
-        "query": search_query,
-        "per_page": 1,
-        "orientation": "landscape"
-    }
-    
+    params = {"query": search_query, "per_page": 1, "orientation": "landscape"}
     try:
         response = requests.get(UNSPLASH_API_URL, headers=UNSPLASH_HEADERS, params=params, timeout=10)
         response.raise_for_status() 
@@ -266,7 +247,7 @@ def get_unsplash_image(search_query: str) -> str:
             return f"https://placehold.co/800x400/CCCCCC/FFFFFF?text=No+Image+For+{search_query.replace(' ', '+')}"
     except Exception as e:
         print(f"--- ❌ ERROR: Unsplash API failed: {e} ---")
-        return "https://placehold.co/800x400/FF0000/FFFFFF?text=Error"
+        return "https_://placehold.co/800x400/FF0000/FFFFFF?text=Error"
 
 
 # --- 3.5: WEB AGENT (MODIFIED) ---
@@ -300,68 +281,48 @@ print("--- 🕸️  Web Agent LCEL Chain Compiled ---")
 
 
 # --- 3.6: BRD AGENT (NEW) ---
-
-# This prompt will generate the BRD as Markdown with proper business content
 brd_agent_prompt = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            "You are a Senior Product Manager creating a professional Business Requirements Document (BRD). "
-            "Generate a comprehensive, well-structured BRD in Markdown format. "
-            "Include specific business metrics, success criteria, timelines, and resource requirements. "
-            "Your response MUST be ONLY the Markdown text, starting with '# Business Requirements Document', with NO other commentary."
+            "You are a Senior Product Manager. Your job is to generate a complete Business Requirements Document (BRD) "
+            "for a new product based on the initial research. The document must be well-structured and formatted as a "
+            "single Markdown string. Use clear headings, bullet points, and numbered lists. "
+            "Your response MUST be ONLY the Markdown text, starting with '# Business Requirements Document'."
         ),
         (
             "human",
-            "Create a detailed BRD for this product launch campaign:"
-            "\n\n--- PRODUCT & CAMPAIGN INFO ---"
-            "\n- Product/Topic: {topic}"
-            "\n- Business Goal: {goal}"
-            "\n- Target Audience: {target_audience}"
-            "\n- Audience Pain Point: {pain_point}"
-            "\n- Value Proposition: {value_proposition}"
-            "\n- Tone of Voice: {tone}"
-            "\n- Call to Action: {cta}"
-            "\n\n--- SECTIONS TO INCLUDE (IN THIS ORDER) ---"
-            "\n\n1. **Executive Summary**"
-            "\n   - Brief overview of the product/campaign"
-            "\n   - Key business objectives and expected ROI"
-            "\n   - Success metrics (2-3 KPIs)"
-            "\n\n2. **Project Scope**"
-            "\n   - What's included in this initiative"
-            "\n   - Out-of-scope items"
-            "\n   - Timeline/milestones"
-            "\n\n3. **Market & Competitive Analysis**"
-            "\n   - Current market size and growth opportunity"
-            "\n   - Key competitors and differentiation"
-            "\n   - Market trends relevant to this product"
-            "\n\n4. **Target Audience & User Personas**"
-            "\n   - Primary persona with demographics, goals, and pain points"
-            "\n   - Secondary personas if applicable"
-            "\n   - Audience segments and sizing"
-            "\n\n5. **Business Requirements**"
-            "\n   - Functional requirements (what the product must do)"
-            "\n   - Non-functional requirements (performance, security, scalability)"
-            "\n   - Regulatory or compliance requirements if any"
-            "\n\n6. **User Stories & Use Cases**"
-            "\n   - 4-6 user stories in 'As a [user], I want to [action], so that [benefit]' format"
-            "\n   - Acceptance criteria for each story"
-            "\n\n7. **Success Criteria & KPIs**"
-            "\n   - Specific, measurable success metrics"
-            "\n   - Target numbers for engagement, conversion, or adoption"
-            "\n   - Timeline for measurement (30, 60, 90 days)"
-            "\n\n8. **Resource Requirements**"
-            "\n   - Team roles and responsibilities"
-            "\n   - Budget estimate (if applicable)"
-            "\n   - Dependencies and risks"
-            "\n\n9. **Implementation Timeline**"
-            "\n   - Phase-based rollout plan"
-            "\n   - Key milestones and deliverables"
-            "\n   - Go-live date and post-launch support plan"
-            "\n\n10. **Risk Assessment & Mitigation**"
-            "\n    - Key risks (technical, market, resource)"
-            "\n    - Mitigation strategies"
-            "\n    - Contingency plans"
+            "Please generate a complete BRD in Markdown format for the following product:"
+            "\n\n--- INITIAL RESEARCH ---"
+            "\n- Product Topic: {topic}"
+            "\n- Campaign Goal: {goal}"
+            "\n- Audience Persona: {audience_persona}"
+            "\n- Core Messaging: {core_messaging}"
+            "\n\n--- BRD TEMPLATE TO FILL ---"
+            "\n# Business Requirements Document: {topic}"
+            "\n\n## 1. Project Overview"
+            "\n### 1.1. Introduction"
+            "\n(Write a brief summary of the project.)"
+            "\n### 1.2. Business Objectives"
+            "\n(List 3-5 key business goals. Use the 'Campaign Goal' as a starting point.)"
+            "\n"
+            "\n## 2. Target Audience"
+            "\n### 2.1. Primary Persona"
+            "\n(Describe the target user based on the 'Audience Persona'.)"
+            "\n### 2.2. Key Problems (Pain Points)"
+            "\n(List the problems this product solves, based on 'pain_point'.)"
+            "\n"
+            "\n## 3. Proposed Solution"
+            "\n### 3.1. Solution Overview"
+            "\n(Describe how the product solves the audience's problems. Use the 'value_proposition'.)"
+            "\n### 3.2. Key Features (Functional Requirements)"
+            "\n(List 5-7 key features for this product.)"
+            "\n"
+            "\n## 4. User Stories"
+            "\n(Write 3-5 user stories in the format: 'As a [persona], I want to [action] so that [benefit]'.)"
+            "\n"
+            "\n## 5. Success Metrics"
+            "\n(List 3-5 KPIs to measure success, related to the 'Business Objectives'.)"
         ),
     ]
 )
@@ -369,132 +330,54 @@ brd_agent_chain = brd_agent_prompt | llm | StrOutputParser()
 print("--- 📄 BRD Agent LCEL Chain Compiled ---")
 
 
+# --- 3.7: STRATEGY AGENT (NEW) ---
+strategy_agent_prompt = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            "You are a Chief Strategist. Your job is to generate a high-level strategic plan. "
+            "The output must be a single Markdown string. Use clear headings and bullet points. "
+            "Your response MUST be ONLY the Markdown text, starting with '# Strategic Approach'."
+        ),
+        (
+            "human",
+            "Please generate a strategic approach for the following goal. Break it down into 3-5 key phases or points. "
+            "For each point, provide a brief description of *how* to approach it."
+            "\n\n- **Project Topic:** {topic}"
+            "\n- **Primary Goal:** {goal}"
+        ),
+    ]
+)
+strategy_agent_chain = strategy_agent_prompt | llm | StrOutputParser()
+print("--- 📈 Strategy Agent LCEL Chain Compiled ---")
+
+
 # --- 4. AGENT "WORKSTATIONS" (The Nodes) ---
 
-# --- NEW PDF HELPER FUNCTION WITH PROPER MARKDOWN PARSING ---
+# --- NEW PDF HELPER FUNCTION ---
 def save_markdown_as_pdf(markdown_text: str, filename: str) -> str:
     """
-    Converts a Markdown string to a professionally formatted PDF file using fpdf2.
-    Properly parses and formats Markdown with automatic text wrapping to prevent overflow.
+    Converts a Markdown string to a PDF file using fpdf2.
     """
     try:
         pdf = FPDF()
-        pdf.set_auto_page_break(auto=True, margin=15)
         pdf.add_page()
         
-        # Set proper margins
-        pdf.set_left_margin(15)
-        pdf.set_right_margin(15)
-        pdf.set_top_margin(15)
+        if os.path.exists("DejaVuSans.ttf"):
+            pdf.add_font('DejaVu', '', 'DejaVuSans.ttf', uni=True)
+            pdf.set_font('DejaVu', size=12)
+        else:
+            print("--- ⚠️ Font 'DejaVuSans.ttf' not found. Using 'Arial'. Special characters may not render. ---")
+            print("--- ⚠️ Download it from https://github.com/dejavu-fonts/dejavu-fonts/blob/master/ttf/DejaVuSans.ttf?raw=true ---")
+            pdf.set_font("Arial", size=12)
         
-        # Available width for text
-        cell_width = 180  # A4 width minus margins
-        
-        # Parse and format Markdown
-        lines = markdown_text.split('\n')
-        
-        for line in lines:
-            line_stripped = line.strip()
-            
-            # Skip completely empty lines
-            if not line_stripped:
-                pdf.ln(1)
-                continue
-            
-            try:
-                # H1 Headers (# ...)
-                if line_stripped.startswith('# '):
-                    pdf.set_font("Helvetica", 'B', size=16)
-                    pdf.set_text_color(0, 0, 0)
-                    text = line_stripped[2:].strip()
-                    pdf.cell(0, 10, text, new_x="LMARGIN", new_y="NEXT")
-                    pdf.ln(2)
-                
-                # H2 Headers (## ...)
-                elif line_stripped.startswith('## '):
-                    pdf.set_font("Helvetica", 'B', size=13)
-                    pdf.set_text_color(40, 80, 160)  # Dark blue
-                    text = line_stripped[3:].strip()
-                    pdf.cell(0, 10, text, new_x="LMARGIN", new_y="NEXT")
-                    pdf.set_text_color(0, 0, 0)
-                    pdf.ln(1)
-                
-                # H3 Headers (### ...)
-                elif line_stripped.startswith('### '):
-                    pdf.set_font("Helvetica", 'B', size=11)
-                    pdf.set_text_color(80, 80, 80)  # Gray
-                    text = line_stripped[4:].strip()
-                    pdf.cell(0, 10, text, new_x="LMARGIN", new_y="NEXT")
-                    pdf.set_text_color(0, 0, 0)
-                    pdf.ln(0.5)
-                
-                # Bullet points (- or * followed by space and text)
-                elif (line_stripped.startswith('- ') or line_stripped.startswith('* ')) and len(line_stripped) > 2:
-                    pdf.set_font("Helvetica", size=10)
-                    pdf.set_text_color(0, 0, 0)
-                    # Extract bullet text
-                    bullet_text = line_stripped[2:].strip() if line_stripped.startswith('- ') else line_stripped[2:].strip()
-                    
-                    # Use dash instead of bullet character for compatibility
-                    text_with_bullet = '- ' + bullet_text
-                    # Write text with wrapping - multi_cell handles it automatically
-                    pdf.multi_cell(cell_width, 5.5, text_with_bullet, border=0)
-                
-                # Numbered lists (1. 2. 3. etc)
-                elif len(line_stripped) > 2 and line_stripped[0].isdigit() and line_stripped[1:3].strip().startswith('.'):
-                    pdf.set_font("Helvetica", size=10)
-                    pdf.set_text_color(0, 0, 0)
-                    
-                    # Extract number and text
-                    dot_index = line_stripped.find('.')
-                    if dot_index > 0:
-                        num_part = line_stripped[:dot_index+1]
-                        text_part = line_stripped[dot_index+1:].strip()
-                        
-                        current_x = pdf.get_x()
-                        current_y = pdf.get_y()
-                        
-                        # Write number
-                        pdf.set_x(current_x + 3)
-                        pdf.cell(5, 6, num_part, ln=False)
-                        pdf.set_x(current_x + 10)
-                        
-                        # Write text with wrapping
-                        pdf.multi_cell(cell_width - 10, 5.5, text_part, border=0)
-                    else:
-                        # Fallback if parsing fails
-                        pdf.multi_cell(cell_width, 5.5, line_stripped, border=0)
-                
-                # Bold text (**...**) or (__...__) 
-                elif ('**' in line_stripped or '__' in line_stripped) and len(line_stripped) > 4:
-                    pdf.set_font("Helvetica", 'B', size=10)
-                    pdf.set_text_color(0, 0, 0)
-                    clean_line = line_stripped.replace('**', '').replace('__', '').replace('_', '')
-                    pdf.multi_cell(cell_width, 5.5, clean_line, border=0)
-                    pdf.set_font("Helvetica", size=10)
-                
-                # Regular text (body paragraphs) - most common case
-                else:
-                    pdf.set_font("Helvetica", size=10)
-                    pdf.set_text_color(0, 0, 0)
-                    # multi_cell automatically wraps text based on cell_width
-                    pdf.multi_cell(cell_width, 5.5, line_stripped, border=0)
-                    
-            except Exception as line_err:
-                print(f"--- ⚠️ Warning: Could not render line: {line_stripped[:40]}... Error: {line_err} ---")
-                try:
-                    pdf.set_font("Helvetica", size=9)
-                    pdf.multi_cell(cell_width, 4, line_stripped, border=0)
-                except:
-                    pass
+        pdf.multi_cell(0, 5, markdown_text, markdown=True)
         
         pdf.output(filename)
-        print(f"--- 📄 PDF saved as: {filename} (properly formatted Markdown) ---")
+        print(f"--- 📄 PDF saved as: {filename} ---")
         return filename
     except Exception as e:
         print(f"--- ❌ ERROR saving PDF: {e} ---")
-        import traceback
-        traceback.print_exc()
         return "error_saving_pdf.pdf"
 
 def planner_agent_node(state: CampaignState) -> dict:
@@ -509,12 +392,7 @@ def planner_agent_node(state: CampaignState) -> dict:
 
 def research_agent_node(state: CampaignState) -> dict:
     print("--- 2. 🧠 Calling Research Agent (REAL) ---")
-    
-    inputs = {
-        "topic": state.topic,
-        "target_audience": state.target_audience,
-    }
-    
+    inputs = {"topic": state.topic, "target_audience": state.target_audience}
     try:
         if state.source_docs_url:
             print(f"--- ⚠️ source_docs_url provided, but IGNORING IT to avoid token limits. ---")
@@ -527,7 +405,7 @@ def research_agent_node(state: CampaignState) -> dict:
         return {} 
 
 def content_agent_node(state: CampaignState) -> dict:
-    print("--- 3. ✍️ Calling Content Agent (REAL) ---")
+    print("--- 4. ✍️ Calling Content Agent (REAL) ---")
     try:
         inputs = {
             "goal": state.goal,
@@ -544,7 +422,7 @@ def content_agent_node(state: CampaignState) -> dict:
         return {}
 
 def design_agent_node(state: CampaignState) -> dict:
-    print("--- 4. 🎨 Calling Design Agent (REAL) ---")
+    print("--- 5. 🎨 Calling Design Agent (REAL) ---")
     
     mock_brand_kit = BrandKit(
         logo_prompt=f"A minimalist, tech-inspired logo for {state.topic}",
@@ -570,7 +448,7 @@ def design_agent_node(state: CampaignState) -> dict:
     }
 
 def web_agent_node(state: CampaignState) -> dict:
-    print("--- 5. 🕸️ Calling Web Agent (REAL) ---")
+    print("--- 6. 🕸️ Calling Web Agent (REAL) ---")
     
     try:
         inputs = {
@@ -593,54 +471,159 @@ def web_agent_node(state: CampaignState) -> dict:
         pprint.pprint(e)
         return {}
 
-
-# --- NEW AGENT NODE ---
+# --- NEW AGENT NODE (BRD) ---
 def brd_agent_node(state: CampaignState) -> dict:
-    print("--- 6. 📄 Calling BRD Agent (REAL) ---")
+    print("--- 7. 📄 Calling BRD Agent (REAL) ---")
     try:
-        # Extract individual fields from audience_persona and core_messaging
-        persona = state.audience_persona or {}
-        messaging = state.core_messaging or {}
-        
         inputs = {
-            "topic": state.topic or "Product",
-            "goal": state.goal or "Launch and market the product",
-            "target_audience": state.target_audience or "Target users",
-            "pain_point": persona.get("pain_point", "Unmet market need"),
-            "value_proposition": messaging.get("value_proposition", "Innovative solution"),
-            "tone": messaging.get("tone_of_voice", "Professional and engaging"),
-            "cta": messaging.get("call_to_action", "Learn more"),
+            "topic": state.topic,
+            "goal": state.goal,
+            "audience_persona": state.audience_persona,
+            "core_messaging": state.core_messaging,
         }
-        
         print("--- 📄 Generating BRD Markdown... ---")
         brd_markdown = brd_agent_chain.invoke(inputs)
         
-        # Save the PDF
-        # Create a 'campaign_outputs' directory if it doesn't exist
+        # Create a directory for outputs if it doesn't exist
         output_dir = "campaign_outputs"
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
+            
+        filename = f"{output_dir}/{state.topic.lower().replace(' ', '_')}_brd.pdf"
+        pdf_path = save_markdown_as_pdf(brd_markdown, filename)
         
-        # Create a safe filename from the topic
-        safe_filename = state.topic.lower().replace(' ', '_').replace('/', '_').replace('\\', '_')
-        filename = f"{safe_filename}_brd.pdf"
-        file_path = os.path.join(output_dir, filename)
-        
-        pdf_path = save_markdown_as_pdf(brd_markdown, file_path)
-        
-        # Return the download URL
-        return {"brd_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}
+        return {"brd_url": pdf_path}
 
     except Exception as e:
         print(f"--- ❌ ERROR in BRD Agent: {e} ---")
         pprint.pprint(e)
         return {}
 
+# --- MODIFIED STRATEGY AGENT ---
+def strategy_agent_node(state: CampaignState) -> dict:
+    print("--- 3. 📈 Calling Strategy Agent (REAL) ---")
+    try:
+        inputs = {
+            "topic": state.topic,
+            "goal": state.goal,
+        }
+        print("--- 📈 Generating Strategy Markdown... ---")
+        strategy_markdown = strategy_agent_chain.invoke(inputs)
+        
+        # --- NO PDF CONVERSION ---
+        
+        return {"strategy_markdown": strategy_markdown} # <-- Save the raw text
+
+    except Exception as e:
+        print(f"--- ❌ ERROR in Strategy Agent: {e} ---")
+        pprint.pprint(e)
+        return {}
+
 
 def ops_agent_node(state: CampaignState) -> dict:
-    print("--- 7. ⚙️ Calling Ops Agent (MOCK) ---") # Step 7
-    mock_ops_data = {"automation_status": {"mailchimp_automation_id": "abc-123", "scheduled_post_count": "5"}}
-    return mock_ops_data
+    print("--- 8. ⚙️ Ops Agent (Slack + Telegram) Started ---")
+
+    # ------------------------------  
+    # 1. Load Slack + Telegram credentials
+    # ------------------------------
+    SLACK_WEBHOOK = os.getenv("SLACK_WEBHOOK_URL")
+    BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+    CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+    results = {
+        "slack": [],
+        "telegram": []
+    }
+
+    # ------------------------------
+    # 2. Loop through each generated post
+    # ------------------------------
+    for i, post in enumerate(state.social_posts):
+        text = post.content.strip()
+        image_key = f"post_{i+1}_image_url"
+        image_url = state.generated_assets.get(image_key)
+
+        # =====================================================
+        #  A) SEND TO SLACK
+        # =====================================================
+        if SLACK_WEBHOOK:
+            try:
+                print(f"📤 Sending post {i+1} to Slack...")
+
+                if image_url:
+                    slack_payload = {
+                        "blocks": [
+                            {
+                                "type": "section",
+                                "text": {"type": "mrkdwn", "text": text}
+                            },
+                            {
+                                "type": "image",
+                                "image_url": image_url,
+                                "alt_text": f"image_post_{i+1}"
+                            }
+                        ]
+                    }
+                else:
+                    slack_payload = {"text": text}
+
+                resp = requests.post(
+                    SLACK_WEBHOOK,
+                    json=slack_payload,
+                    timeout=10
+                )
+                results["slack"].append({
+                    "post_number": i + 1,
+                    "status": resp.status_code
+                })
+            except Exception as e:
+                results["slack"].append({
+                    "post_number": i + 1,
+                    "error": str(e)
+                })
+                print(f"--- ❌ Slack Error on post {i+1}: {e} ---")
+
+        # =====================================================
+        #  B) SEND TO TELEGRAM
+        # =====================================================
+        if BOT_TOKEN and CHAT_ID:
+            try:
+                print(f"📤 Sending post {i+1} to Telegram...")
+
+                if image_url:
+                    tg_resp = requests.post(
+                        f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
+                        data={"chat_id": CHAT_ID, "caption": text, "photo": image_url},
+                        timeout=10
+                    ).json()
+                else:
+                    tg_resp = requests.post(
+                        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                        data={"chat_id": CHAT_ID, "text": text},
+                        timeout=10
+                    ).json()
+
+                results["telegram"].append({
+                    "post_number": i + 1,
+                    "response": tg_resp
+                })
+            except Exception as e:
+                results["telegram"].append({
+                    "post_number": i + 1,
+                    "error": str(e)
+                })
+                print(f"--- ❌ Telegram Error on post {i+1}: {e} ---")
+
+    print("--- 8. ⚙️ Ops Agent Finished (Slack + Telegram) ---")
+
+    return {
+        "automation_status": {
+            "slack_results": results["slack"],
+            "telegram_results": results["telegram"],
+            "status": "completed"
+        }
+    }
+
 
 
 # --- 5. LANGGRAPH "FACTORY FLOOR" (The Graph) ---
@@ -653,17 +636,19 @@ graph_builder.add_node("research_agent", research_agent_node)
 graph_builder.add_node("content_agent", content_agent_node)
 graph_builder.add_node("design_agent", design_agent_node)
 graph_builder.add_node("web_agent", web_agent_node)
-graph_builder.add_node("brd_agent", brd_agent_node) # <-- NEW
+graph_builder.add_node("brd_agent", brd_agent_node) 
+graph_builder.add_node("strategy_agent", strategy_agent_node) # <-- Name is the same
 graph_builder.add_node("ops_agent", ops_agent_node)
 
 # Add all edges (sequential flow)
 graph_builder.set_entry_point("planner_agent")
 graph_builder.add_edge("planner_agent", "research_agent")
-graph_builder.add_edge("research_agent", "content_agent")
+graph_builder.add_edge("research_agent", "strategy_agent")  # Strategy runs right after research
+graph_builder.add_edge("strategy_agent", "content_agent")
 graph_builder.add_edge("content_agent", "design_agent")
 graph_builder.add_edge("design_agent", "web_agent")
-graph_builder.add_edge("web_agent", "brd_agent") # <-- NEW
-graph_builder.add_edge("brd_agent", "ops_agent") # <-- NEW
+graph_builder.add_edge("web_agent", "brd_agent") 
+graph_builder.add_edge("brd_agent", "ops_agent") 
 graph_builder.add_edge("ops_agent", END)
 
 
@@ -676,7 +661,18 @@ print("--- ✅ Foundry Graph Compiled ---")
 
 # --- 6. FASTAPI SERVER (The Streaming Endpoint) ---
 
+from fastapi.responses import FileResponse
+
 app = FastAPI()
+
+# Add CORS middleware to allow frontend requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],  # Vite default port
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods (GET, POST, OPTIONS, etc.)
+    allow_headers=["*"],  # Allow all headers
+)
 
 class StreamRequest(BaseModel):
     initial_prompt: str
@@ -740,47 +736,92 @@ async def websocket_endpoint(websocket: WebSocket):
         pass
 
 
-@app.get("/download_pdf/{filename}")
-async def download_pdf(filename: str):
-    """
-    Serves PDF files from the campaign_outputs directory.
-    Prevents directory traversal attacks by sanitizing filename.
-    """
-    # Sanitize filename to prevent directory traversal
-    filename = filename.replace("../", "").replace("..\\", "").replace("..", "")
-    
-    file_path = os.path.join("campaign_outputs", filename)
-    
-    # Convert to absolute path for verification
-    abs_file_path = os.path.abspath(file_path)
-    abs_output_dir = os.path.abspath("campaign_outputs")
-    
-    print(f"--- 📥 Download request for: {filename} ---")
-    print(f"--- 📍 File path: {abs_file_path} ---")
-    print(f"--- 📍 Output dir: {abs_output_dir} ---")
-    
-    # Verify the file exists
-    if not os.path.exists(abs_file_path) or not os.path.isfile(abs_file_path):
-        print(f"--- ❌ PDF file not found: {abs_file_path} ---")
-        return {"error": "PDF file not found"}
-    
-    # Verify it's inside campaign_outputs (not outside)
-    if not abs_file_path.startswith(abs_output_dir):
-        print(f"--- ❌ Attempted directory traversal: {abs_file_path} ---")
-        return {"error": "Invalid file path"}
-    
-    print(f"--- ✅ Serving PDF: {abs_file_path} ---")
-    
-    return FileResponse(
-        abs_file_path,
-        media_type="application/pdf",
-        filename=filename,
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
-    )
-
 @app.get("/")
 async def root():
     return {"message": "AI Campaign Foundry Server is running. Connect via WebSocket."}
+
+@app.get("/download_brd/{filename}")
+async def download_brd(filename: str):
+    """Serve BRD PDF files for download"""
+    file_path = os.path.join("campaign_outputs", filename)
+    
+    if not os.path.exists(file_path):
+        return {"error": "File not found"}
+    
+    return FileResponse(
+        path=file_path,
+        media_type='application/pdf',
+        filename=filename,
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}"
+        }
+    )
+
+class DeployRequest(BaseModel):
+    html_content: str
+    project_name: str
+
+@app.post("/deploy_to_vercel")
+async def deploy_to_vercel(request: DeployRequest):
+    """Deploy HTML content to Vercel"""
+    
+    VERCEL_TOKEN = os.getenv("VERCEL_TOKEN")
+    
+    if not VERCEL_TOKEN:
+        return {"error": "VERCEL_TOKEN not found in environment variables"}
+    
+    try:
+        # Create deployment payload
+        deployment_payload = {
+            "name": request.project_name,
+            "files": [
+                {
+                    "file": "index.html",
+                    "data": request.html_content
+                }
+            ],
+            "projectSettings": {
+                "framework": None
+            }
+        }
+        
+        # Deploy to Vercel
+        headers = {
+            "Authorization": f"Bearer {VERCEL_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.post(
+            "https://api.vercel.com/v13/deployments",
+            headers=headers,
+            json=deployment_payload,
+            timeout=30
+        )
+        
+        if response.status_code in [200, 201]:
+            data = response.json()
+            deployment_url = data.get("url", "")
+            
+            # Vercel returns URL without protocol
+            if deployment_url and not deployment_url.startswith("http"):
+                deployment_url = f"https://{deployment_url}"
+            
+            return {
+                "success": True,
+                "url": deployment_url,
+                "id": data.get("id"),
+                "name": data.get("name")
+            }
+        else:
+            error_data = response.json()
+            return {
+                "error": error_data.get("error", {}).get("message", "Deployment failed"),
+                "status_code": response.status_code
+            }
+            
+    except Exception as e:
+        print(f"--- ❌ ERROR deploying to Vercel: {e} ---")
+        return {"error": str(e)}
 
 if __name__ == "__main__":
     print("--- 🚀 Starting FastAPI server on http://localhost:8000 ---")

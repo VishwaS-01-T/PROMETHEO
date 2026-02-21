@@ -7,3 +7,6 @@ uvicorn
 websockets
 langchain-community
 langchain_tavily
+requests
+fpdf2
+beautifulsoup4

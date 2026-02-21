@@ -1,14 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import BackButton from '../components/BackButton'
 import CardGrid from '../components/cards/CardGrid'
-import ExpandedCard from '../components/cards/ExpandedCard'
 
 export default function Report(){
   const loc = useLocation()
   const navigate = useNavigate()
-  const uploaded = loc.state || {}
+  const locationState = loc.state || {}
 
-  const [prompt, setPrompt] = useState("We're launching a new product called 'ChromaDB-V' and we need to run a webinar to get signups. The target audience is backend developers at fast-growing tech companies. All the technical details are in our launch blog post: https://www.databricks.com/blog/introducing-dbrx-new-state-art-open-llm")
+  // Get prompt from navigation state (sent from PromptPage)
+  const [prompt, setPrompt] = useState(locationState.prompt || "")
   const [logNodes, setLogNodes] = useState([])
   const [jsonState, setJsonState] = useState({})
   const [plannerData, setPlannerData] = useState(null)
@@ -20,24 +21,247 @@ export default function Report(){
   const outputRef = useRef(null)
   const [running, setRunning] = useState(false)
   const [brdUrl, setBrdUrl] = useState(null)
-  // card UI state (on-demand rendering)
-  const [expandedCard, setExpandedCard] = useState(null)
-  // Initial state management
-  const [showInitial, setShowInitial] = useState(true)
-  const [uploadedFile, setUploadedFile] = useState(null)
-  const [isTransitioning, setIsTransitioning] = useState(false)
+  const [strategyMarkdown, setStrategyMarkdown] = useState(null)
 
-  // Add CSS for fade in animation
+  // Add CSS for animations and card styling
   React.useEffect(() => {
     const style = document.createElement('style')
     style.textContent = `
+      @import url('https://fonts.googleapis.com/css2?family=Urbanist:wght@100;200;300;400;500;600;700;800;900&display=swap');
+      
       @keyframes fadeIn {
         from { opacity: 0; }
         to { opacity: 1; }
       }
+      @keyframes pulse-subtle {
+        0%, 100% { 
+          opacity: 1; 
+          transform: scale(1); 
+          box-shadow: 0 0 20px rgba(168, 85, 247, 0.4), 0 0 40px rgba(168, 85, 247, 0.2);
+        }
+        50% { 
+          opacity: 0.9; 
+          transform: scale(1.02); 
+          box-shadow: 0 0 30px rgba(168, 85, 247, 0.6), 0 0 60px rgba(168, 85, 247, 0.3);
+        }
+      }
+      .animate-pulse-subtle {
+        animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+      
+      .campaign-card-wrapper {
+        position: relative;
+        height: 342px;
+        width: 100%;
+        max-width: 655px;
+        margin: 0 auto;
+      }
+      
+      .campaign-card {
+        background: linear-gradient(135deg, #2a1e4a 0%, #1a1a2e 100%);
+        width: 100%;
+        height: 100%;
+        border-radius: 5px;
+        position: relative;
+        box-shadow: -20px 30px 116px 0 rgba(92, 15, 15, 0.54);
+        overflow: hidden;
+        z-index: 4;
+        transition: transform 0.1s ease-out;
+      }
+      
+      .campaign-card__orangeShine,
+      .campaign-card__greenShine {
+        position: absolute;
+        background-repeat: no-repeat;
+        background-size: cover;
+        pointer-events: none;
+      }
+      
+      .campaign-card__orangeShine {
+        background: radial-gradient(circle at 30% 50%, rgba(168, 85, 247, 0.3) 0%, transparent 60%);
+        right: -150px;
+        top: -90px;
+        bottom: 50px;
+        z-index: 2;
+        width: 570px;
+        height: 500px;
+        transition: transform 0.1s ease-out;
+      }
+      
+      .campaign-card__greenShine {
+        background: radial-gradient(circle at 50% 50%, rgba(139, 92, 246, 0.2) 0%, transparent 70%);
+        left: 20%;
+        top: 0;
+        bottom: 0;
+        z-index: 1;
+        width: 400px;
+      }
+      
+      .campaign-card__title {
+        font-family: 'Urbanist', sans-serif;
+        text-align: center;
+        color: #fff;
+        font-size: 48px;
+        line-height: 1.2;
+        padding: 30px 20px;
+        font-weight: 800;
+        position: relative;
+        z-index: 2;
+        transition: transform 0.1s ease-out;
+      }
+      
+      .campaign-card__content {
+        position: absolute;
+        left: 5%;
+        right: 5%;
+        bottom: 15%;
+        z-index: 2;
+        color: #fff;
+        transition: transform 0.1s ease-out;
+      }
+      
+      .campaign-card__circle,
+      .campaign-card__smallCircle {
+        position: absolute;
+        border-radius: 100%;
+        background: linear-gradient(-239deg, rgba(168, 85, 247, 0.3) 0%, rgba(139, 92, 246, 0.2) 59%);
+        box-shadow: -10px -15px 90px 0 rgba(107, 33, 168, 0.3);
+        z-index: 2;
+        transition: transform 0.1s ease-out;
+      }
+      
+      .campaign-card__circle {
+        right: 68px;
+        bottom: 34px;
+        width: 230px;
+        height: 230px;
+      }
+      
+      .campaign-card__smallCircle {
+        right: 40%;
+        top: -7%;
+        width: 50px;
+        height: 50px;
+      }
+      
+      .campaign-card__comet {
+        position: relative;
+        width: 8px;
+        height: 8px;
+        background-color: #fff;
+        border-radius: 100%;
+        transition: transform 0.1s ease-out;
+      }
+      
+      .campaign-card__cometOuter {
+        position: absolute;
+        top: 30%;
+        left: 25%;
+        z-index: 3;
+      }
+      
+      .campaign-card__comet--second {
+        position: absolute;
+        right: -30px;
+        top: -15px;
+        transform: scale(0.6);
+      }
+      
+      .campaign-card__comet:before,
+      .campaign-card__comet:after {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        background: linear-gradient(to bottom, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.2) 27%, rgba(255, 255, 255, 0) 100%);
+        border-radius: 20px;
+        transform: rotate(-45deg);
+      }
+      
+      .campaign-card__comet:before {
+        width: 18px;
+        height: 70px;
+        transform-origin: -2px 13px;
+      }
+      
+      .campaign-card__comet:after {
+        width: 12px;
+        height: 80px;
+        transform-origin: 0px 8px;
+      }
+      
+      .campaign-card__field {
+        display: inline-block;
+        margin: 8px 15px;
+        padding: 8px 16px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        border: 1px solid rgba(168, 85, 247, 0.3);
+        backdrop-filter: blur(10px);
+        transition: all 0.3s ease;
+      }
+      
+      .campaign-card__field:hover {
+        background: radial-gradient(circle at center, rgba(168, 85, 247, 0.2), rgba(139, 92, 246, 0.15));
+        box-shadow: 0 0 20px rgba(168, 85, 247, 0.4), 0 0 40px rgba(168, 85, 247, 0.2);
+      }
+      
+      .campaign-card__field-label {
+        font-family: 'Urbanist', sans-serif;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: rgba(168, 85, 247, 1);
+        font-weight: 800;
+        margin-bottom: 4px;
+      }
+      
+      .campaign-card__field-value {
+        font-size: 13px;
+        color: #fff;
+        font-weight: 300;
+      }
     `
     document.head.appendChild(style)
     return () => document.head.removeChild(style)
+  }, [])
+  
+  // Mouse move effect for card
+  React.useEffect(() => {
+    const handleMouseMove = (e) => {
+      const card = document.querySelector('.campaign-card')
+      if (!card) return
+      
+      const rect = card.getBoundingClientRect()
+      const x = (e.clientX - rect.left - rect.width / 2) * -1 / 100
+      const y = (e.clientY - rect.top - rect.height / 2) * -1 / 100
+      
+      const smallCircle = document.querySelector('.campaign-card__smallCircle')
+      const circle = document.querySelector('.campaign-card__circle')
+      const title = document.querySelector('.campaign-card__title')
+      const content = document.querySelector('.campaign-card__content')
+      const orangeShine = document.querySelector('.campaign-card__orangeShine')
+      const comet = document.querySelector('.campaign-card__cometOuter')
+      
+      if (smallCircle) smallCircle.style.transform = `translate(${e.clientX * 0.03}px, ${e.clientY * 0.03}px)`
+      if (content) content.style.transform = `translate(${e.clientX * 0.03}px, ${e.clientY * 0.03}px)`
+      if (orangeShine) orangeShine.style.transform = `translate(${e.clientX * 0.09}px, ${e.clientY * 0.09}px)`
+      if (circle) circle.style.transform = `translate(${e.clientX * 0.05}px, ${e.clientY * 0.05}px)`
+      if (title) title.style.transform = `translate(${e.clientX * 0.03}px, ${e.clientY * 0.03}px)`
+      if (comet) comet.style.transform = `translate(${e.clientX * 0.05}px, ${e.clientY * 0.05}px)`
+      
+      const matrix = [
+        [1, 0, 0, -x * 0.00005],
+        [0, 1, 0, -y * 0.00005],
+        [0, 0, 1, 1],
+        [0, 0, 0, 1]
+      ]
+      
+      card.style.transform = `matrix3d(${matrix.toString()})`
+    }
+    
+    document.addEventListener('mousemove', handleMouseMove)
+    return () => document.removeEventListener('mousemove', handleMouseMove)
   }, [])
 
   // helper to append to log
@@ -45,21 +269,23 @@ export default function Report(){
     setLogNodes((prev) => [...prev, { id: Date.now() + Math.random(), html: htmlContent, isSeparator }])
   }
 
-  // connect on mount - only when not showing initial screen
+  // connect on mount and auto-start if navigated from PromptPage
   useEffect(() => {
-    if (!showInitial) {
-      addOutputMessage('<strong>STATUS:</strong> Connecting...')
-      connect()
-      // Auto-run foundry after connection
+    addOutputMessage('<strong>STATUS:</strong> Connecting...')
+    connect()
+    
+    // Auto-run if autoStart flag is set from PromptPage
+    if (locationState.autoStart && prompt) {
       setTimeout(() => {
-        sendPrompt()
-      }, 1000)
+        sendPrompt();
+      }, 1000);
     }
+    
     return () => {
       if (wsRef.current) wsRef.current.close()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showInitial])
+  }, [])
 
   useEffect(() => {
     if (outputRef.current) {
@@ -130,6 +356,12 @@ export default function Report(){
               }
             }
 
+            if (nodeName === 'strategy_agent') {
+              if (jsonData.strategy_markdown) {
+                setStrategyMarkdown(jsonData.strategy_markdown)
+              }
+            }
+
             let snippet = `Updated landing_page_url: ${jsonData.landing_page_url}`
             if (nodeName === 'planner_agent') snippet = `Planned topic: ${jsonData.topic}`
             if (nodeName === 'research_agent') snippet = `Found pain point: ${jsonData.audience_persona?.pain_point || 'N/A'}`
@@ -190,32 +422,6 @@ export default function Report(){
     setRunning(true)
   }
 
-  function handleFileUpload(event) {
-    const file = event.target.files?.[0]
-    if (file && file.type === 'application/pdf') {
-      setUploadedFile(file)
-      // Create a temporary URL for the file
-      const fileUrl = URL.createObjectURL(file)
-      setBrdUrl(fileUrl)
-    } else {
-      alert('Please upload a PDF file.')
-    }
-  }
-
-  function handleContinue() {
-    if (!prompt.trim()) {
-      alert('Please enter a prompt.')
-      return
-    }
-    
-    setIsTransitioning(true)
-    // Start the transition animation
-    setTimeout(() => {
-      setShowInitial(false)
-      setIsTransitioning(false)
-    }, 600) // Match the animation duration
-  }
-
   /* --------------------
      Small inline SVG icon components for action buttons
      -------------------- */
@@ -258,220 +464,115 @@ export default function Report(){
     </svg>
   )
 
+  function goToResearch() {
+    if (!researchData) return
+    try {
+      localStorage.setItem('campaign_research', JSON.stringify({ researchData }))
+      window.open('/research', '_blank')
+    } catch (e) {
+      console.error('Failed opening research in new tab', e)
+    }
+  }
+
   return (
-    <div>
-    <button onClick={() => navigate(-1)} className="fixed left-5 px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded transition-colors">
-    ← Back
-    </button>
-    <div className="max-w-[1200px] mx-auto my-5 px-5">
-      
-      <div className="flex gap-4 mb-4">
-        <h1 className="text-3xl font-bold">BRD / Foundry</h1>
-      </div>
+    <div className="w-full" style={{ background:'#FFFFFF', minHeight:'100vh' }}>
+      <BackButton />
 
-      {/* Initial View - Two Boxes */}
-      {showInitial && (
-        <div 
-          className="transition-all duration-600 ease-in-out"
-          style={{
-            opacity: isTransitioning ? 0 : 1,
-            transform: isTransitioning ? 'scale(1.1)' : 'scale(1)',
-            transition: 'opacity 0.6s ease-in-out, transform 0.6s ease-in-out'
-          }}
-        >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-            {/* PDF Upload Box */}
-            <div className="bg-gradient-to-br from-[#1a1a2e] to-[#16213e] rounded-2xl p-8 border border-gray-700 shadow-[0_8px_24px_rgba(0,0,0,0.3)] flex flex-col items-center justify-center min-h-[300px]">
-              <h2 className="text-white text-2xl font-bold mb-6 text-center">Upload BRD Report</h2>
-              <div className="w-full">
-                <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-gray-600 rounded-xl cursor-pointer hover:border-purple-500 transition-colors bg-white/5">
-                  <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                    <svg className="w-12 h-12 mb-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                    </svg>
-                    <p className="mb-2 text-sm text-gray-400">
-                      <span className="font-semibold">Click to upload</span> or drag and drop
-                    </p>
-                    <p className="text-xs text-gray-500">PDF files only</p>
-                  </div>
-                  <input type="file" className="hidden" accept=".pdf" onChange={handleFileUpload} />
-                </label>
-                {uploadedFile && (
-                  <div className="mt-4 text-center">
-                    <p className="text-green-400 text-sm">✓ {uploadedFile.name}</p>
-                  </div>
-                )}
+      <div className="flex flex-col lg:flex-row w-full min-h-screen">
+        {/* Left Section 70% */}
+        <div className="lg:w-[70%] w-full p-6 space-y-8">
+          {/* Campaign Plan - Animated Card */}
+          <div className="campaign-card-wrapper">
+            <div className="campaign-card">
+              <div className="campaign-card__cometOuter">
+                <div className="campaign-card__comet"></div>
+                <div className="campaign-card__comet campaign-card__comet--second"></div>
               </div>
-            </div>
-
-            {/* Prompt Box */}
-            <div className="bg-gradient-to-br from-[#1a1a2e] to-[#16213e] rounded-2xl p-8 border border-gray-700 shadow-[0_8px_24px_rgba(0,0,0,0.3)] flex flex-col min-h-[300px]">
-              <h2 className="text-white text-2xl font-bold mb-6 text-center">Campaign Prompt</h2>
-              <textarea 
-                className="flex-1 w-full p-4 border border-gray-600 rounded-lg bg-[#0a0a0a] text-white font-inherit resize-none focus:border-purple-500 focus:outline-none transition-colors"
-                placeholder="Describe your campaign goals, target audience, and key details..."
-                value={prompt} 
-                onChange={(e) => setPrompt(e.target.value)} 
-              />
+              <div className="campaign-card__circle"></div>
+              <div className="campaign-card__smallCircle"></div>
+              <div className="campaign-card__orangeShine"></div>
+              <div className="campaign-card__greenShine"></div>
+              
+              <div className="campaign-card__title">
+                Campaign Plan
+              </div>
+              
+              {plannerData ? (
+                <div className="campaign-card__content">
+                  <div className="campaign-card__field">
+                    <div className="campaign-card__field-label">Goal</div>
+                    <div className="campaign-card__field-value">{plannerData.goal || '—'}</div>
+                  </div>
+                  <div className="campaign-card__field">
+                    <div className="campaign-card__field-label">Topic</div>
+                    <div className="campaign-card__field-value">{plannerData.topic || '—'}</div>
+                  </div>
+                  <div className="campaign-card__field">
+                    <div className="campaign-card__field-label">Audience</div>
+                    <div className="campaign-card__field-value">{plannerData.target_audience || '—'}</div>
+                  </div>
+                  <div className="campaign-card__field">
+                    <div className="campaign-card__field-label">Date</div>
+                    <div className="campaign-card__field-value">
+                      {plannerData.campaign_date ? new Date(plannerData.campaign_date).toLocaleDateString() : 'TBD'}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="campaign-card__content">
+                  <div style={{textAlign: 'center', opacity: 0.6, fontStyle: 'italic'}}>
+                    Waiting for Campaign Plan...
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Continue Button */}
-          <div className="flex justify-center">
-            <button 
-              className="px-12 py-4 bg-gradient-to-br from-[#667eea] to-[#764ba2] text-white border-none rounded-xl text-lg font-semibold cursor-pointer transition-all duration-300 hover:translate-y-[-2px] hover:shadow-[0_12px_24px_rgba(102,126,234,0.4)] disabled:opacity-60 disabled:cursor-not-allowed"
-              onClick={handleContinue}
-              disabled={!prompt.trim()}
-            >
-              {uploadedFile ? 'Continue' : 'Continue Without a Report*'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Main Content - Hidden initially, revealed after continue */}
-      {!showInitial && (
-        <div 
-          className="transition-opacity duration-600 ease-in-out"
-          style={{
-            opacity: 1,
-            animation: 'fadeIn 0.6s ease-in-out'
-          }}
-        >
-          {uploadedFile && (
-            <div className="mb-3">
-              <strong>Uploaded BRD:</strong> {uploadedFile.name}
-            </div>
-          )}
-
-          {/* Expanded card modal (renders on demand) */}
-          {expandedCard ? (
-            <ExpandedCard 
-              cardId={expandedCard} 
-              onClose={() => setExpandedCard(null)} 
+          {/* Cards 2x2 */}
+          <div className="mt-12">
+            <CardGrid
               brdUrl={brdUrl}
+              strategyMarkdown={strategyMarkdown}
               landingPageCode={landingPageCode}
               contentData={contentData}
               generatedAssets={generatedAssets}
             />
-          ) : null}
+          </div>
 
-          {/* The rest of the Foundry UI (planner, research, content, etc.) */}
-          <div className="max-w-[1400px] mx-auto p-5">
-            <h1 className="hidden">AI Campaign Foundry</h1>
-        
-        {/* Planner Summary Panel - Moved above cards */}
-        <div className="bg-gradient-to-br from-[#1a1a2e] to-[#16213e] rounded-2xl p-7 mb-6 border border-gray-700 shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
-          <h2 className="text-white mb-5 text-2xl font-bold">Campaign Plan</h2>
-          {plannerData ? (
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-4">
-              <div className="col-span-full bg-gradient-to-br from-[rgba(102,126,234,0.15)] to-[rgba(118,75,162,0.15)] backdrop-blur-[10px] border border-white/10 rounded-xl p-5 transition-all duration-300 hover:translate-y-[-4px] hover:shadow-[0_8px_16px_rgba(102,126,234,0.2)] hover:border-[rgba(102,126,234,0.4)]">
-                <div className="text-xs font-bold uppercase tracking-wider text-purple-300 mb-2">Goal</div>
-                <div className="text-white text-[15px] leading-normal">{plannerData.goal || '—'}</div>
-              </div>
-
-              <div className="bg-white/5 backdrop-blur-[10px] border border-white/10 rounded-xl p-5 transition-all duration-300 hover:translate-y-[-4px] hover:shadow-[0_8px_16px_rgba(102,126,234,0.2)] hover:border-[rgba(102,126,234,0.4)]">
-                <div className="text-xs font-bold uppercase tracking-wider text-purple-300 mb-2">Topic</div>
-                <div className="text-white text-[15px] leading-normal">{plannerData.topic || '—'}</div>
-              </div>
-
-              <div className="bg-white/5 backdrop-blur-[10px] border border-white/10 rounded-xl p-5 transition-all duration-300 hover:translate-y-[-4px] hover:shadow-[0_8px_16px_rgba(102,126,234,0.2)] hover:border-[rgba(102,126,234,0.4)]">
-                <div className="text-xs font-bold uppercase tracking-wider text-purple-300 mb-2">Audience</div>
-                <div className="text-white text-[15px] leading-normal">{plannerData.target_audience || '—'}</div>
-              </div>
-
-              <div className="bg-white/5 backdrop-blur-[10px] border border-white/10 rounded-xl p-5 transition-all duration-300 hover:translate-y-[-4px] hover:shadow-[0_8px_16px_rgba(102,126,234,0.2)] hover:border-[rgba(102,126,234,0.4)]">
-                <div className="text-xs font-bold uppercase tracking-wider text-purple-300 mb-2">Docs</div>
-                <a className="text-blue-300 no-underline text-sm font-semibold transition-colors hover:text-blue-200 hover:underline" href={plannerData.source_docs_url || '#'} target="_blank" rel="noreferrer">{plannerData.source_docs_url ? 'Open' : '—'}</a>
-              </div>
-
-              <div className="bg-white/5 backdrop-blur-[10px] border border-white/10 rounded-xl p-5 transition-all duration-300 hover:translate-y-[-4px] hover:shadow-[0_8px_16px_rgba(102,126,234,0.2)] hover:border-[rgba(102,126,234,0.4)]">
-                <div className="text-xs font-bold uppercase tracking-wider text-purple-300 mb-2">Date</div>
-                <div className="text-white text-[15px] leading-normal">{plannerData.campaign_date ? new Date(plannerData.campaign_date).toLocaleDateString() : 'TBD'}</div>
-              </div>
+            {/* Research Button */}
+            <div className="pt-2 flex justify-center">
+              <button
+                onClick={goToResearch}
+                disabled={!researchData}
+                className={`px-8 py-4 rounded-lg font-semibold transition-all text-white disabled:opacity-50 disabled:cursor-not-allowed ${researchData ? 'animate-pulse-subtle hover:scale-105' : ''}`}
+                style={{background: researchData ? 'linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%)' : '#d1d5db'}}
+              >
+                {researchData ? 'Get Research Analytics' : 'Waiting for Research Agent...'}
+              </button>
             </div>
-          ) : (
-            <div className="text-gray-500 italic text-center py-10">Planner summary will appear here after the Planner Agent runs.</div>
-          )}
         </div>
 
-        {/* Cards UI - Moved after Campaign Plan */}
-        <div className="my-6">
-          <CardGrid onCardClick={(id) => setExpandedCard(id)} />
-        </div>
-
-        {/* Research Panel */}
-        <div className="bg-gradient-to-br from-[#1e1b3c] to-[#2a1e4a] rounded-2xl p-7 mb-6 border border-gray-600 shadow-[0_8px_24px_rgba(0,0,0,0.3)]">
-          <h2 className="text-white mb-5 text-2xl font-bold">Research Insights</h2>
-          {researchData ? (
-            <div className="grid gap-6">
-              <div>
-                <h3 className="text-purple-300 text-lg font-semibold mb-4">Audience Persona</h3>
-                <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
-                  <div className="bg-white/5 backdrop-blur-[10px] border border-white/10 rounded-xl p-5 transition-all duration-300 hover:translate-y-[-4px] hover:shadow-[0_8px_16px_rgba(167,139,250,0.2)] hover:border-[rgba(167,139,250,0.4)]">
-                    <div className="text-xs font-bold uppercase tracking-wider text-purple-300 mb-2">Pain Point</div>
-                    <div className="text-gray-200 text-sm leading-relaxed">{researchData.audience_persona.pain_point || '—'}</div>
-                  </div>
-                  <div className="bg-white/5 backdrop-blur-[10px] border border-white/10 rounded-xl p-5 transition-all duration-300 hover:translate-y-[-4px] hover:shadow-[0_8px_16px_rgba(167,139,250,0.2)] hover:border-[rgba(167,139,250,0.4)]">
-                    <div className="text-xs font-bold uppercase tracking-wider text-purple-300 mb-2">Motivation</div>
-                    <div className="text-gray-200 text-sm leading-relaxed">{researchData.audience_persona.motivation || '—'}</div>
-                  </div>
-                  <div className="bg-white/5 backdrop-blur-[10px] border border-white/10 rounded-xl p-5 transition-all duration-300 hover:translate-y-[-4px] hover:shadow-[0_8px_16px_rgba(167,139,250,0.2)] hover:border-[rgba(167,139,250,0.4)]">
-                    <div className="text-xs font-bold uppercase tracking-wider text-purple-300 mb-2">Channel</div>
-                    <div className="text-gray-200 text-sm leading-relaxed">{researchData.audience_persona.preferred_channel || '—'}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <h3 className="text-purple-300 text-lg font-semibold mb-4">Core Messaging</h3>
-                <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
-                  <div className="bg-gradient-to-br from-[rgba(167,139,250,0.15)] to-[rgba(139,92,246,0.15)] border-[rgba(167,139,250,0.3)] backdrop-blur-[10px] border rounded-xl p-5 transition-all duration-300 hover:translate-y-[-4px] hover:shadow-[0_8px_16px_rgba(167,139,250,0.2)] hover:border-[rgba(167,139,250,0.4)]">
-                    <div className="text-xs font-bold uppercase tracking-wider text-purple-300 mb-2">Value Prop</div>
-                    <div className="text-gray-200 text-sm leading-relaxed">{researchData.core_messaging.value_proposition || '—'}</div>
-                  </div>
-                  <div className="bg-white/5 backdrop-blur-[10px] border border-white/10 rounded-xl p-5 transition-all duration-300 hover:translate-y-[-4px] hover:shadow-[0_8px_16px_rgba(167,139,250,0.2)] hover:border-[rgba(167,139,250,0.4)]">
-                    <div className="text-xs font-bold uppercase tracking-wider text-purple-300 mb-2">Tone</div>
-                    <div className="text-gray-200 text-sm leading-relaxed">{researchData.core_messaging.tone_of_voice || '—'}</div>
-                  </div>
-                  <div className="bg-white/5 backdrop-blur-[10px] border border-white/10 rounded-xl p-5 transition-all duration-300 hover:translate-y-[-4px] hover:shadow-[0_8px_16px_rgba(167,139,250,0.2)] hover:border-[rgba(167,139,250,0.4)]">
-                    <div className="text-xs font-bold uppercase tracking-wider text-purple-300 mb-2">CTA</div>
-                    <div className="text-gray-200 text-sm leading-relaxed">{researchData.core_messaging.call_to_action || '—'}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="text-gray-500 italic text-center py-10">Research insights will appear here after the Research Agent runs.</div>
-          )}
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-5">
-          <div className="bg-[#1a1a1a] rounded-xl p-5 border border-gray-700">
-            <h2 className="mt-0 mb-4 text-white text-xl">Activity Log</h2>
-            <div className="bg-[#0a0a0a] rounded-lg border border-[#222]">
-              <div className="max-h-[400px] overflow-y-auto p-4 font-mono text-sm leading-relaxed" ref={outputRef}>
+        {/* Right Section 30% */}
+        <div className="lg:w-[30%] w-full p-6 space-y-6 bg-gray-50">
+          {/* Activity Log */}
+          <div className="rounded-xl p-5 border border-gray-200 shadow-md" style={{background:'linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%)'}}>
+            <h2 className="mt-0 mb-4 text-gray-800 text-xl" style={{fontFamily: 'Urbanist, sans-serif', fontWeight: 800}}>Activity Log</h2>
+            <div className="bg-white rounded-lg border border-gray-200">
+              <div className="max-h-[400px] overflow-y-auto p-4 font-mono text-sm leading-relaxed text-black" ref={outputRef}>
                 {logNodes.map((n) => (
-                  <div key={n.id} className={`mb-3 p-2 bg-[#1a1a1a] rounded border-l-[3px] ${n.isSeparator ? 'border-l-orange-500 bg-[#2a1a0a] my-4' : 'border-l-[#667eea]'}`} dangerouslySetInnerHTML={{ __html: n.html }} />
+                  <div key={n.id} className={`mb-3 p-2 bg-gray-50 rounded border-l-[3px] text-black ${n.isSeparator ? 'border-l-orange-400 bg-orange-50 my-4' : 'border-l-purple-400'}`} dangerouslySetInnerHTML={{ __html: n.html }} />
                 ))}
               </div>
             </div>
           </div>
 
-          <div className="bg-[#1a1a1a] rounded-xl p-5 border border-gray-700">
-            <h2 className="mt-0 mb-4 text-white text-xl">Live Campaign State (JSON)</h2>
-            <pre className="bg-[#0a0a0a] border border-[#222] rounded-lg p-4 max-h-[400px] overflow-y-auto font-mono text-[13px] text-gray-400 whitespace-pre-wrap break-words">{JSON.stringify(jsonState, null, 2)}</pre>
+          {/* Live State */}
+          <div className="rounded-xl p-5 border border-gray-200 shadow-md" style={{background:'linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%)'}}>
+            <h2 className="mt-0 mb-4 text-gray-800 text-xl" style={{fontFamily: 'Urbanist, sans-serif', fontWeight: 800}}>Live Campaign State (JSON)</h2>
+            <pre className="bg-white border border-gray-200 rounded-lg p-4 max-h-[400px] overflow-y-auto font-mono text-[13px] text-gray-700 whitespace-pre-wrap break-words">{JSON.stringify(jsonState, null, 2)}</pre>
           </div>
         </div>
-          </div>
-        </div>
-      )}
-    </div>
-    {showInitial && (
-      <div className="text-purple-400 text-right pr-10 text-[0.8em] mt-2">
-        {uploadedFile ? '' : '*We will generate it for you if you don\'t have it'}
-    </div>)}
-
+      </div>
     </div>
   )
 }

@@ -5,7 +5,7 @@ import Card2Content from './expanded/Card2Content'
 import Card3Content from './expanded/Card3Content'
 import Card4Content from './expanded/Card4Content'
 
-function ExpandedCard({ cardId, onClose, brdUrl, landingPageCode, contentData, generatedAssets }) {
+function ExpandedCard({ cardId, onClose, brdUrl, strategyMarkdown, landingPageCode, contentData, generatedAssets }) {
   useEffect(() => {
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = 'unset' }
@@ -19,7 +19,7 @@ function ExpandedCard({ cardId, onClose, brdUrl, landingPageCode, contentData, g
 
   const renderContent = () => {
     switch (cardId) {
-      case 1: return <Card1Content brdUrl={brdUrl} />
+      case 1: return <Card1Content brdUrl={brdUrl} strategyMarkdown={strategyMarkdown} />
       case 2: return <Card2Content landingPageCode={landingPageCode} />
       case 3: return <Card3Content contentData={contentData} generatedAssets={generatedAssets} />
       case 4: return <Card4Content />
