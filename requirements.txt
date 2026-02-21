@@ -1,0 +1,9 @@
+python-dotenv
+langgraph[pydantic]
+pydantic
+langchain-groq
+fastapi
+uvicorn
+websockets
+langchain-community
+langchain_tavily
