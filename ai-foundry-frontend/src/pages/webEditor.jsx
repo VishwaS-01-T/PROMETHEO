@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
-import Button from '../components/Button'
 
 export default function WebEditor(){
   const loc = useLocation()
   const [html, setHtml] = useState('<!-- Paste landing page HTML here -->')
+  const [regenerating, setRegenerating] = useState(false)
   const [deploying, setDeploying] = useState(false)
   const [deploymentUrl, setDeploymentUrl] = useState(null)
   const [deployError, setDeployError] = useState(null)
@@ -22,13 +22,68 @@ export default function WebEditor(){
     }
   }, [loc])
 
-  const handleRegenerate = () => {
-    const variations = [
-      `<!-- Regenerated HTML Version 1 -->\n<!DOCTYPE html>\n<html>\n<head><title>Landing Page</title></head>\n<body><h1>Version 1</h1></body>\n</html>`,
-      `<!-- Regenerated HTML Version 2 -->\n<!DOCTYPE html>\n<html>\n<head><title>Landing Page</title></head>\n<body><h1>Version 2</h1></body>\n</html>`
-    ]
-    setHtml(variations[Math.floor(Math.random() * variations.length)])
-    alert('Code regenerated successfully!')
+  const handleRegenerate = async () => {
+    if (regenerating) return
+    setRegenerating(true)
+
+    try {
+      let plannerData = null
+      let researchData = null
+      let generatedAssets = null
+
+      try {
+        const storedPlanner = localStorage.getItem('campaign_planner')
+        if (storedPlanner) plannerData = JSON.parse(storedPlanner)?.plannerData || null
+      } catch (e) {
+        console.error('Failed loading planner from storage', e)
+      }
+
+      try {
+        const storedResearch = localStorage.getItem('campaign_research')
+        if (storedResearch) researchData = JSON.parse(storedResearch)?.researchData || null
+      } catch (e) {
+        console.error('Failed loading research from storage', e)
+      }
+
+      try {
+        const storedContent = localStorage.getItem('campaign_content')
+        if (storedContent) generatedAssets = JSON.parse(storedContent)?.generatedAssets || null
+      } catch (e) {
+        console.error('Failed loading content/assets from storage', e)
+      }
+
+      const payload = {
+        topic: plannerData?.topic || null,
+        goal: plannerData?.goal || null,
+        audience_persona: researchData?.audience_persona || null,
+        core_messaging: researchData?.core_messaging || null,
+        generated_assets: generatedAssets || null,
+        company_name: plannerData?.company_name || plannerData?.topic || 'AI Foundry'
+      }
+
+      const response = await fetch('http://localhost:8000/regenerate_landing_page', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+
+      const data = await response.json()
+      if (!response.ok || !data?.success || !data?.html) {
+        throw new Error(data?.error || 'Regeneration failed')
+      }
+
+      setHtml(data.html)
+      try {
+        localStorage.setItem('campaign_landingPageCode', data.html)
+      } catch (e) {
+        console.error('Failed saving landingPageCode to storage', e)
+      }
+    } catch (e) {
+      console.error('Regenerate error:', e)
+      alert(`Regeneration failed: ${e.message || e}`)
+    } finally {
+      setRegenerating(false)
+    }
   }
 
   const handleCopyCode = () => {
@@ -106,9 +161,10 @@ export default function WebEditor(){
                 </button>
                 <button
                   onClick={handleRegenerate}
+                  disabled={regenerating}
                   className="flex-1 py-2 px-4 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold transition-colors text-sm"
                 >
-                  Regenerate
+                  {regenerating ? 'Regenerating...' : 'Regenerate'}
                 </button>
                 <button
                   onClick={handleDeployToVercel}
@@ -157,7 +213,7 @@ export default function WebEditor(){
                 className="w-full h-[520px] bg-white"
                 srcDoc={html}
                 title="Landing Page Preview"
-                sandbox="allow-same-origin"
+                sandbox="allow-same-origin allow-scripts"
               />
             </div>
           </div>

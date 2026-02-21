@@ -1,3 +1,4 @@
+// ...existing code...
 import { useEffect, useRef, useState } from "react";
 import AnimatedBackground from "../components/AnimatedBackground";
 import PromptInput from "../components/PromptInput";
@@ -43,7 +44,7 @@ const Index = () => {
   useEffect(() => {
     // Connect WebSocket on mount
     connectWebSocket();
-    
+
     return () => {
       if (wsRef.current) {
         wsRef.current.close();
@@ -78,9 +79,9 @@ const Index = () => {
   const sendPrompt = (text) => {
     const promptText = text?.trim();
     if (!promptText) return;
-    
+
     const ws = wsRef.current;
-    
+
     // Check WebSocket connection
     if (!ws || ws.readyState === WebSocket.CLOSED) {
       console.log('WebSocket not connected, attempting to reconnect...');
@@ -91,13 +92,13 @@ const Index = () => {
       alert('Connecting to server. Please wait a moment and try again.');
       return;
     }
-    
+
     setRunning(true);
-    
+
     // Send prompt to backend
     ws.send(JSON.stringify({ initial_prompt: promptText }));
     console.log('Prompt sent to backend:', promptText);
-    
+
     // Navigate to report page with the prompt
     setTimeout(() => {
       navigate('/workflow', { state: { prompt: promptText, autoStart: true } });
@@ -107,8 +108,21 @@ const Index = () => {
   return (
     <div className="relative min-h-screen w-full overflow-hidden bg-background">
       <AnimatedBackground theme={theme} />
-      <div className="relative z-10 flex flex-col items-center justify-center min-h-screen px-4 py-20">
-        <div className="absolute top-6 right-6 z-20">
+
+      {/* Fixed Header */}
+      <header className="fixed top-0 left-0 right-0 z-40 h-16 flex items-center justify-between px-6 backdrop-blur bg-white/60 dark:bg-black/40 border-b border-gray-200/50 dark:border-gray-800/50">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/')}
+            className="font-semibold text-lg text-gray-900 dark:text-gray-100"
+            title="Home"
+          >
+            AI Foundry
+          </button>
+          <span className="hidden md:inline text-sm text-gray-600 dark:text-gray-300">— Build your startup</span>
+        </div>
+
+        <div className="flex items-center gap-3">
           <button
             onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}
             title="Toggle theme"
@@ -120,8 +134,11 @@ const Index = () => {
             </span>
           </button>
         </div>
+      </header>
 
-        <div className="text-center mb-12 space-y-4">
+      {/* Main content with padding so fixed header/footer do not overlap */}
+      <main className="relative z-10 flex flex-col items-center justify-center min-h-screen px-4 pt-24 pb-24">
+        <div className="text-center mb-12 space-y-4 max-w-5xl w-full">
           <h1
             ref={titleRef}
             className={`text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight flex items-center justify-center flex-wrap ${
@@ -129,11 +146,11 @@ const Index = () => {
             }`}
           >
             <span>Lets Build</span>
-            <span className="bg-linear-to-r from-red-100 via-accent to-pink-500 bg-clip-text text-transparent">
+            <span className="bg-linear-to-r from-red-100 via-accent to-pink-500 bg-clip-text text-transparent ml-3">
               Your Start-up
             </span>
           </h1>
-          
+
           <p
             ref={subtitleRef}
             className={`text-lg md:text-xl max-w-2xl mx-auto ${
@@ -145,14 +162,22 @@ const Index = () => {
         </div>
 
         <PromptInput onSubmit={sendPrompt} isRunning={running} />
-        
+
         <div className="mt-8 text-sm text-muted-foreground/60">
           Press <kbd className="px-2 py-1 bg-secondary/50 rounded text-xs">Enter</kbd> to send or{" "}
           <kbd className="px-2 py-1 bg-secondary/50 rounded text-xs">Shift + Enter</kbd> for new line
         </div>
-      </div>
+      </main>
+
+      {/* Fixed Footer */}
+      <footer className="fixed bottom-0 left-0 right-0 z-40 h-12 flex items-center justify-center text-sm backdrop-blur bg-white/60 dark:bg-black/40 border-t border-gray-200/50 dark:border-gray-800/50">
+        <div className="text-muted-foreground/80">
+          © {new Date().getFullYear()} AI Foundry — Generated website preview. Content is responsive and aligned.
+        </div>
+      </footer>
     </div>
   );
 };
 
 export default Index;
+// ...existing code...

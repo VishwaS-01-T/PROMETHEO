@@ -316,10 +316,16 @@ export default function Report(){
                 goal: jsonData.goal || null,
                 topic: jsonData.topic || null,
                 target_audience: jsonData.target_audience || null,
+                company_name: jsonData.company_name || null,
                 source_docs_url: jsonData.source_docs_url || null,
                 campaign_date: jsonData.campaign_date || null
               }
               setPlannerData(plannerFields)
+              try {
+                localStorage.setItem('campaign_planner', JSON.stringify({ plannerData: plannerFields }))
+              } catch (e) {
+                console.error('Failed saving planner to storage', e)
+              }
             }
 
             if (nodeName === 'research_agent') {
@@ -328,6 +334,11 @@ export default function Report(){
                 core_messaging: jsonData.core_messaging || {}
               }
               setResearchData(researchFields)
+              try {
+                localStorage.setItem('campaign_research', JSON.stringify({ researchData: researchFields }))
+              } catch (e) {
+                console.error('Failed saving research to storage', e)
+              }
             }
 
             if (nodeName === 'content_agent') {
@@ -336,17 +347,32 @@ export default function Report(){
                 social_posts: jsonData.social_posts || []
               }
               setContentData(contentFields)
+              try {
+                localStorage.setItem('campaign_content', JSON.stringify({ contentData: contentFields, generatedAssets }))
+              } catch (e) {
+                console.error('Failed saving content to storage', e)
+              }
             }
 
             if (nodeName === 'design_agent') {
               if (jsonData.generated_assets) {
                 setGeneratedAssets(jsonData.generated_assets)
+                try {
+                  localStorage.setItem('campaign_content', JSON.stringify({ contentData, generatedAssets: jsonData.generated_assets }))
+                } catch (e) {
+                  console.error('Failed saving generated assets to storage', e)
+                }
               }
             }
 
             if (nodeName === 'web_agent') {
               if (jsonData.landing_page_code) {
                 setLandingPageCode(jsonData.landing_page_code)
+                try {
+                  localStorage.setItem('campaign_landingPageCode', jsonData.landing_page_code)
+                } catch (e) {
+                  console.error('Failed saving landing page code to storage', e)
+                }
               }
             }
 

@@ -17,8 +17,8 @@ const HowItWorks = () => {
     const ctx = gsap.context(() => {
       // Set initial button state
       gsap.set(buttonRef.current, {
-        background: 'transparent',
-        border: '2px solid #667eea',
+        background: '#57267D',
+        border: '2px solid #57267D',
       })
 
       // Prepare line
@@ -41,31 +41,7 @@ const HowItWorks = () => {
 
         if (!svg) return { paths: [] }
 
-        // Inject gradient once
-        if (!svg.querySelector(`#${gradId}`)) {
-          const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs')
-          const lg = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient')
-          lg.setAttribute('id', gradId)
-          lg.setAttribute('x1', '0%')
-          lg.setAttribute('y1', '0%')
-          lg.setAttribute('x2', '100%')
-          lg.setAttribute('y2', '100%')
-
-          ;[
-            { offset: '0%', color: '#22d3ee' },
-            { offset: '50%', color: '#38bdf8' },
-            { offset: '100%', color: '#a855f7' },
-          ].forEach((s) => {
-            const stopEl = document.createElementNS('http://www.w3.org/2000/svg', 'stop')
-            stopEl.setAttribute('offset', s.offset)
-            stopEl.setAttribute('stop-color', s.color)
-            lg.appendChild(stopEl)
-          })
-
-          defs.appendChild(lg)
-          svg.insertBefore(defs, svg.firstChild)
-        }
-
+        // Inject gradient once — replaced with solid color
         const drawableSelectors = 'path,line,polyline,polygon,circle,rect,ellipse'
         const paths = Array.from(svg.querySelectorAll(drawableSelectors))
 
@@ -96,7 +72,7 @@ const HowItWorks = () => {
 
           gsap.set(path, {
             fill: 'none',
-            stroke: `url(#${gradId})`,
+            stroke: '#AD79D5',
             strokeWidth: 2,
             strokeLinecap: 'round',
             strokeLinejoin: 'round',
@@ -165,8 +141,8 @@ const HowItWorks = () => {
         once: true,
         onEnter: () => {
           gsap.to(buttonRef.current, {
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            border: '2px solid transparent',
+            background: '#AD79D5',
+            border: '2px solid #AD79D5',
             duration: 1.5,
             ease: 'power2.inOut',
           })
@@ -205,7 +181,7 @@ const HowItWorks = () => {
   ]
 
   return (
-    <section id="learn" className="min-h-screen flex items-center py-20 px-4 sm:px-6 lg:px-8 bg-white">
+    <section id="learn" className="min-h-screen flex items-center py-6 px-4 sm:px-6 lg:px-8 bg-white">
       <div className="container mx-auto max-w-7xl w-full">
 
         {/* First Way - If you have idea for your startup */}
@@ -215,20 +191,13 @@ const HowItWorks = () => {
             <div className="hidden lg:block absolute top-24 left-0 right-0 pointer-events-none" 
                  style={{ margin: '0 10%' }}>
               <svg viewBox="0 0 1000 2" className="w-full h-0.5" preserveAspectRatio="none">
-                <defs>
-                  <linearGradient id="workflowLineGlow" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stopColor="#22d3ee" />
-                    <stop offset="50%" stopColor="#38bdf8" />
-                    <stop offset="100%" stopColor="#a855f7" />
-                  </linearGradient>
-                </defs>
                 <line
                   ref={lineRef}
                   x1="0" y1="1" x2="1000" y2="1"
-                  stroke="url(#workflowLineGlow)"
+                  stroke="#AD79D5"
                   strokeWidth="2"
                   strokeLinecap="round"
-                  className="drop-shadow-[0_0_18px_rgba(56,189,248,0.9)]"
+                  className="drop-shadow-[0_0_18px_rgba(173,121,213,0.9)]"
                 />
               </svg>
             </div>
@@ -242,11 +211,11 @@ const HowItWorks = () => {
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true, margin: '-100px' }}
                   transition={{ duration: 0.5, delay: index * 0.1 }}
+                  whileHover={{ scale: 1.05, y: -8, boxShadow: '0 20px 50px rgba(87, 38, 125, 0.5)' }}
                   className="glass rounded-2xl p-6 md:p-8 transition-all duration-300 relative group overflow-hidden"
                   style={{
                     aspectRatio: '1/1',
-                    background:
-                      'linear-gradient(to bottom right, #C084FC, #A855F7 20%, #7C3AED 65%, #6B21A8)',
+                    background: '#57267D',
                   }}
                 >
                   {/* Step Number */}
@@ -267,12 +236,12 @@ const HowItWorks = () => {
                         transition={{ duration: 0.3 }}
                         className="icon-animate relative"
                       >
-                        <step.icon className="w-16 h-16 md:w-20 md:h-20" strokeWidth={1.5} />
+                        <step.icon className="w-16 h-16 md:w-20 md:h-20 stroke-white" strokeWidth={1.5} />
                       </motion.div>
                     </div>
 
                     {/* Content */}
-                    <h3 className="text-xl md:text-2xl font-bold text-white heading-gradient press-start-2p-regular">
+                    <h3 className="text-xl md:text-2xl font-bold text-white press-start-2p-regular">
                       {step.title}
                     </h3>
                     <p className="text-white/90 leading-relaxed px-2">
@@ -311,4 +280,3 @@ const HowItWorks = () => {
 }
 
 export default HowItWorks
-

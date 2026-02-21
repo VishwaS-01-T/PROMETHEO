@@ -109,7 +109,7 @@ const Features = ({ onPositionsCalculated, onAllClicked }) => {
       // Prepare stroke animations for pipes
       const preparePath = (p) => {
         const len = p.getTotalLength()
-        gsap.set(p, { strokeDasharray: len, strokeDashoffset: len, opacity: 0 })
+        gsap.set(p, { strokeDasharray: len, strokeDashoffset: len, opacity: 0, stroke: '#AD79D5' })
         return len
       }
       preparePath(left)
@@ -131,31 +131,6 @@ const Features = ({ onPositionsCalculated, onAllClicked }) => {
       : iconContainer.querySelector('svg')
 
   if (!svg) return { paths: [] }
-
-  // inject gradient once
-  if (!svg.querySelector(`#${gradId}`)) {
-    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs')
-    const lg = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient')
-    lg.setAttribute('id', gradId)
-    lg.setAttribute('x1', '0%')
-    lg.setAttribute('y1', '0%')
-    lg.setAttribute('x2', '100%')
-    lg.setAttribute('y2', '100%')
-
-    ;[
-      { offset: '0%', color: '#22d3ee' },
-      { offset: '50%', color: '#38bdf8' },
-      { offset: '100%', color: '#a855f7' },
-    ].forEach((s) => {
-      const stopEl = document.createElementNS('http://www.w3.org/2000/svg', 'stop')
-      stopEl.setAttribute('offset', s.offset)
-      stopEl.setAttribute('stop-color', s.color)
-      lg.appendChild(stopEl)
-    })
-
-    defs.appendChild(lg)
-    svg.insertBefore(defs, svg.firstChild)
-  }
 
   const drawableSelectors = 'path,line,polyline,polygon,circle,rect,ellipse'
   const paths = Array.from(svg.querySelectorAll(drawableSelectors))
@@ -187,7 +162,7 @@ const Features = ({ onPositionsCalculated, onAllClicked }) => {
 
     gsap.set(path, {
       fill: 'none',
-      stroke: `url(#${gradId})`,
+      stroke: '#AD79D5',
       strokeWidth: 2,
       strokeLinecap: linecap,
       strokeLinejoin: 'round',
@@ -302,71 +277,63 @@ const Features = ({ onPositionsCalculated, onAllClicked }) => {
         </div>
 
         {/* DIV 2: SVG PIPELINES (BEHIND) + SCROLL BUTTON */}
-        <div className="relative mt-16 flex flex-col items-center z-10">
+        <div className="relative mt-8 flex flex-col items-center z-10">
           <div className="absolute -top-20 left-0 right-0 flex justify-center -z-10 pointer-events-none">
             <svg viewBox="0 0 1000 220" className="w-full max-w-5xl h-52">
-              <defs>
-                <linearGradient id="pipeBase" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#d1d5db" stopOpacity="0.3" />
-                  <stop offset="50%" stopColor="#9ca3af" stopOpacity="0.4" />
-                  <stop offset="100%" stopColor="#d1d5db" stopOpacity="0.3" />
-                </linearGradient>
-                <linearGradient id="pipeGlow" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#22d3ee" />
-                  <stop offset="50%" stopColor="#38bdf8" />
-                  <stop offset="100%" stopColor="#a855f7" />
-                </linearGradient>
-              </defs>
-
+              {/* Base pipes (visible track) */}
               <path
                 d="M0 0 V110 H430"
-                stroke="url(#pipeBase)"
+                stroke="#57267D"
                 strokeWidth="6"
                 strokeLinecap="round"
                 fill="none"
+                opacity="0.3"
               />
               <path
                 d="M500 0 V110 H0"
-                stroke="url(#pipeBase)"
+                stroke="#57267D"
                 strokeWidth="6"
                 strokeLinecap="round"
                 fill="none"
+                opacity="0.3"
               />
               <path
                 d="M1000 0 V110 H570"
-                stroke="url(#pipeBase)"
+                stroke="#57267D"
                 strokeWidth="6"
                 strokeLinecap="round"
                 fill="none"
+                opacity="0.3"
               />
 
+              {/* Animated glow pipes (fill on scroll) */}
               <path
                 ref={leftPathRef}
                 d="M0 0 V110 H430"
-                stroke="url(#pipeGlow)"
+                stroke="#AD79D5"
                 strokeWidth="7"
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 fill="none"
-                className="drop-shadow-[0_0_18px_rgba(56,189,248,0.9)]"
+                className="drop-shadow-[0_0_18px_rgba(173,121,213,0.9)]"
               />
               <path
                 ref={middlePathRef}
                 d="M500 0 V110 H0"
-                stroke="url(#pipeGlow)"
+                stroke="#AD79D5"
                 strokeWidth="7"
                 strokeLinecap="round"
                 fill="none"
-                className="drop-shadow-[0_0_18px_rgba(56,189,248,0.9)]"
+                className="drop-shadow-[0_0_18px_rgba(173,121,213,0.9)]"
               />
               <path
                 ref={rightPathRef}
                 d="M1000 0 V110 H570"
-                stroke="url(#pipeGlow)"
+                stroke="#AD79D5"
                 strokeWidth="7"
                 strokeLinecap="round"
                 fill="none"
-                className="drop-shadow-[0_0_18px_rgba(56,189,248,0.9)]"
+                className="drop-shadow-[0_0_18px_rgba(173,121,213,0.9)]"
               />
             </svg>
           </div>
@@ -374,34 +341,15 @@ const Features = ({ onPositionsCalculated, onAllClicked }) => {
           <button
             ref={scrollButtonRef}
             type="button"
-            className="pointer-events-none relative mt-2 px-8 py-3 rounded-full border border-cyan-400/60 bg-slate-950/80 text-xs sm:text-sm font-semibold tracking-[0.35em] uppercase text-cyan-100 shadow-[0_0_30px_rgba(59,130,246,0.65)] overflow-hidden"
+            className="pointer-events-none relative mt-2 px-8 py-3 rounded-full border border-[#57267D] bg-[#57267D] text-xs sm:text-sm font-semibold tracking-[0.35em] uppercase text-white shadow-[0_0_30px_rgba(87,38,125,0.65)] overflow-hidden"
           >
             <div
               ref={buttonFillRef}
-              className="absolute inset-0 bg-gradient-to-r from-cyan-400 via-sky-400 to-purple-500 opacity-90"
+              className="absolute inset-0 bg-[#AD79D5]"
               style={{ transformOrigin: 'left' }}
             />
             <span className="relative z-10">Scroll</span>
           </button>
-            {/* New SVG with vertical glowing line below scroll button */}
-            <div className="flex justify-center mt-8">
-              <svg viewBox="0 0 40 120" width="40" height="120">
-                <defs>
-                  <linearGradient id="verticalGlow" x1="0%" y1="0%" x2="0%" y2="100%">
-                    <stop offset="0%" stopColor="#22d3ee" />
-                    <stop offset="50%" stopColor="#38bdf8" />
-                    <stop offset="100%" stopColor="#a855f7" />
-                  </linearGradient>
-                </defs> 
-                <line
-                  x1="20" y1="0" x2="20" y2="120"
-                  stroke="url(#verticalGlow)"
-                  strokeWidth="7"
-                  strokeLinecap="round"
-                  className="drop-shadow-[0_0_18px_rgba(56,189,248,0.9)]"
-                />
-              </svg>
-            </div>
         </div>
       </div>
     </section>
