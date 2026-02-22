@@ -23,9 +23,18 @@ from langchain_core.output_parsers import StrOutputParser
 
 # --- NEW Imports for Design/BRD Agent ---
 import requests
-from fpdf import FPDF # <-- NEW IMPORT
+from fpdf import FPDF, XPos, YPos  # <-- Import with position enums
 
 load_dotenv()
+
+# --- Auto-rotate API keys to avoid context limit exhaustion ---
+try:
+    from rotate_keys import rotate_api_keys
+    rotate_api_keys()
+except ImportError:
+    print("--- ⚠️  rotate_keys module not found, skipping key rotation ---")
+except Exception as e:
+    print(f"--- ⚠️  Key rotation error: {e} ---")
 
 _grok_key0 = os.getenv("GROQ_API_KEY0")
 if _grok_key0:
@@ -41,9 +50,15 @@ else:
 
 _grok_key2 = os.getenv("GROQ_API_KEY2")
 if _grok_key2:
-    print("--- 🔐 GROQ_API_KEY2 loaded — content, web ---")
+    print("--- 🔐 GROQ_API_KEY2 loaded — content, design, web ---")
 else:
     print("--- ⚠️  GROQ_API_KEY2 not found. Set GROQ_API_KEY2 in your environment or .env file. ---")
+
+_grok_key3 = os.getenv("GROQ_API_KEY3")
+if _grok_key3:
+    print("--- 🔐 GROQ_API_KEY3 loaded — strategy, breakdown, brd ---")
+else:
+    print("--- ⚠️  GROQ_API_KEY3 not found. Set GROQ_API_KEY3 in your environment or .env file. ---")
 
 _tavily_key = os.getenv("TAVILY_API_KEY")
 if _tavily_key:
@@ -62,10 +77,13 @@ llm0 = ChatGroq(model_name="openai/gpt-oss-20b", temperature=0, api_key=_grok_ke
 print(f"--- 🤖 Groq LLM (Key 0) Initialized — jurisdiction, research ---")
 
 llm1 = ChatGroq(model_name="openai/gpt-oss-20b", temperature=0, api_key=_grok_key1)
-print(f"--- 🤖 Groq LLM (Key 1) Initialized — planner, strategy, brd ---")
+print(f"--- 🤖 Groq LLM (Key 1) Initialized — planner ---")
 
 llm2 = ChatGroq(model_name="openai/gpt-oss-20b", temperature=0, api_key=_grok_key2)
-print(f"--- 🤖 Groq LLM (Key 2) Initialized — content, web ---") 
+print(f"--- 🤖 Groq LLM (Key 2) Initialized — content, design, web ---")
+
+llm3 = ChatGroq(model_name="openai/gpt-oss-20b", temperature=0, api_key=_grok_key3)
+print(f"--- 🤖 Groq LLM (Key 3) Initialized — strategy, breakdown, brd ---") 
 
 class EmailStep(BaseModel):
     """A single email in the nurture sequence"""
@@ -613,53 +631,40 @@ def build_landing_page_html(*, company_name: str, sections_html: str) -> str:
 
 
 # --- 3.6: BRD AGENT (NEW) ---
+# BRD Agent: Uses Key 3 to generate full Business Requirements Document
 brd_agent_prompt = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            "You are a Senior Product Manager. Your job is to generate a complete Business Requirements Document (BRD) "
-            "for a new product based on the initial research. The document must be well-structured and formatted as a "
-            "single Markdown string. Use clear headings, bullet points, and numbered lists. "
+            "You are a Senior Product Manager specializing in business requirements. Your job is to generate a complete, "
+            "well-structured Business Requirements Document (BRD) based on the strategy markdown. "
+            "The document must be detailed, professional, and formatted as clean Markdown. "
+            "Use clear headings (# and ##), bullet points, and numbered lists. "
             "Your response MUST be ONLY the Markdown text, starting with '# Business Requirements Document'."
         ),
         (
             "human",
-            "Please generate a complete BRD in Markdown format for the following product:"
-            "\n\n--- INITIAL RESEARCH ---"
-            "\n- Product Topic: {topic}"
-            "\n- Campaign Goal: {goal}"
-            "\n- Audience Persona: {audience_persona}"
-            "\n- Core Messaging: {core_messaging}"
-            "\n\n--- BRD TEMPLATE TO FILL ---"
-            "\n# Business Requirements Document: {topic}"
-            "\n\n## 1. Project Overview"
-            "\n### 1.1. Introduction"
-            "\n(Write a brief summary of the project.)"
-            "\n### 1.2. Business Objectives"
-            "\n(List 3-5 key business goals. Use the 'Campaign Goal' as a starting point.)"
-            "\n"
-            "\n## 2. Target Audience"
-            "\n### 2.1. Primary Persona"
-            "\n(Describe the target user based on the 'Audience Persona'.)"
-            "\n### 2.2. Key Problems (Pain Points)"
-            "\n(List the problems this product solves, based on 'pain_point'.)"
-            "\n"
-            "\n## 3. Proposed Solution"
-            "\n### 3.1. Solution Overview"
-            "\n(Describe how the product solves the audience's problems. Use the 'value_proposition'.)"
-            "\n### 3.2. Key Features (Functional Requirements)"
-            "\n(List 5-7 key features for this product.)"
-            "\n"
-            "\n## 4. User Stories"
-            "\n(Write 3-5 user stories in the format: 'As a [persona], I want to [action] so that [benefit]'.)"
-            "\n"
-            "\n## 5. Success Metrics"
-            "\n(List 3-5 KPIs to measure success, related to the 'Business Objectives'.)"
+            "Based on the following strategic approach, please generate a comprehensive Business Requirements Document in Markdown format:"
+            "\n\n--- STRATEGIC APPROACH ---\n{strategy_markdown}"
+            "\n\n--- BRD STRUCTURE (to follow) ---\n"
+            "# Business Requirements Document\n\n"
+            "## Executive Summary\n"
+            "(Brief overview of the project/product)\n\n"
+            "## 1. Project Overview\n"
+            "### 1.1 Objectives\n"
+            "### 1.2 Scope\n\n"
+            "## 2. Business Requirements\n"
+            "### 2.1 Functional Requirements\n"
+            "### 2.2 Non-Functional Requirements\n\n"
+            "## 3. Success Metrics & KPIs\n"
+            "## 4. Timeline & Milestones\n"
+            "## 5. Risk Assessment\n\n"
+            "Generate the full BRD with substantial content for each section."
         ),
     ]
 )
-brd_agent_chain = brd_agent_prompt | llm1 | StrOutputParser()
-print("--- 📄 BRD Agent LCEL Chain Compiled ---")
+brd_agent_chain = brd_agent_prompt | llm3 | StrOutputParser()
+print("--- 📄 BRD Agent LCEL Chain Compiled (Uses Key 3) ---")
 
 
 # --- 3.7: STRATEGY AGENT (NEW) ---
@@ -680,8 +685,8 @@ strategy_agent_prompt = ChatPromptTemplate.from_messages(
         ),
     ]
 )
-strategy_agent_chain = strategy_agent_prompt | llm1 | StrOutputParser()
-print("--- 📈 Strategy Agent LCEL Chain Compiled ---")
+strategy_agent_chain = strategy_agent_prompt | llm3 | StrOutputParser()
+print("--- 📈 Strategy Agent LCEL Chain Compiled (Uses Key 3) ---")
 
 
 # --- 4. AGENT "WORKSTATIONS" (The Nodes) ---
@@ -689,28 +694,112 @@ print("--- 📈 Strategy Agent LCEL Chain Compiled ---")
 # --- NEW PDF HELPER FUNCTION ---
 def save_markdown_as_pdf(markdown_text: str, filename: str) -> str:
     """
-    Converts a Markdown string to a PDF file using fpdf2.
+    Converts a Markdown string to a professional PDF file using fpdf2.
+    Includes improved formatting with proper margins, spacing, and fonts.
     """
     try:
         pdf = FPDF()
+        pdf.set_margins(15, 15, 15)  # Left, top, right margins
         pdf.add_page()
         
-        if os.path.exists("DejaVuSans.ttf"):
-            pdf.add_font('DejaVu', '', 'DejaVuSans.ttf', uni=True)
-            pdf.set_font('DejaVu', size=12)
-        else:
-            print("--- ⚠️ Font 'DejaVuSans.ttf' not found. Using 'Arial'. Special characters may not render. ---")
-            print("--- ⚠️ Download it from https://github.com/dejavu-fonts/dejavu-fonts/blob/master/ttf/DejaVuSans.ttf?raw=true ---")
-            pdf.set_font("Arial", size=12)
+        # Function to sanitize text for Latin-1 encoding
+        def sanitize_text(text):
+            """Replace problematic Unicode characters with ASCII equivalents"""
+            replacements = {
+                '\u2011': '-',  # non-breaking hyphen → regular hyphen
+                '\u2010': '-',  # hyphen → regular hyphen
+                '\u2013': '--', # en dash → double hyphen
+                '\u2014': '---',# em dash → triple hyphen
+                '\u2018': "'",  # left single quote → apostrophe
+                '\u2019': "'",  # right single quote → apostrophe
+                '\u201c': '"',  # left double quote → quote
+                '\u201d': '"',  # right double quote → quote
+                '\u2026': '...', # ellipsis → three dots
+                '\u00b0': 'o',  # degree symbol
+                '\u00a9': '(c)',# copyright
+                '\u00ae': '(R)',# registered
+                '\u2122': '(TM)',# trademark
+                '\u2022': '*',  # bullet point → asterisk
+                '\u2023': '*',  # triangular bullet → asterisk
+            }
+            for unicode_char, ascii_equiv in replacements.items():
+                text = text.replace(unicode_char, ascii_equiv)
+            # Remove any remaining non-ASCII characters
+            text = text.encode('ascii', 'ignore').decode('ascii')
+            return text
         
-        pdf.multi_cell(0, 5, markdown_text, markdown=True)
+        # Ensure output directory exists
+        output_dir = os.path.dirname(filename)
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir)
         
+        # Convert markdown to professional PDF (handle headings, lists, etc.)
+        lines = markdown_text.split('\n')
+        
+        for line in lines:
+            # Sanitize the line first
+            line = sanitize_text(line)
+            
+            # Check if we need a new page (leave 30mm for footer)
+            if pdf.get_y() > 250:
+                pdf.add_page()
+            
+            if line.startswith('# '):
+                # Main title - add spacing before, bold, larger font
+                pdf.ln(3)
+                pdf.set_font("Helvetica", 'B', 18)
+                pdf.cell(0, 10, line.replace('# ', '').strip(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.ln(2)
+                pdf.set_font("Helvetica", size=11)
+            elif line.startswith('## '):
+                # Section heading - add spacing, bold
+                pdf.ln(2)
+                pdf.set_font("Helvetica", 'B', 14)
+                pdf.cell(0, 10, line.replace('## ', '').strip(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.ln(1)
+                pdf.set_font("Helvetica", size=11)
+            elif line.startswith('### '):
+                # Subsection - slightly bold
+                pdf.ln(1)
+                pdf.set_font("Helvetica", 'B', 12)
+                pdf.cell(0, 8, line.replace('### ', '').strip(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.set_font("Helvetica", size=11)
+            elif line.startswith('- ') or line.startswith('* '):
+                # Bullet point - with proper indentation (use * instead of •)
+                bullet_text = line.replace('- ', '').replace('* ', '').strip()
+                pdf.set_font("Helvetica", size=10)
+                pdf.set_x(20)  # Indent bullet points
+                pdf.multi_cell(0, 6, '* ' + bullet_text, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            elif line.startswith('1. ') or (len(line) > 2 and line[0].isdigit() and line[1:3] == '. '):
+                # Numbered list item
+                pdf.set_font("Helvetica", size=10)
+                pdf.set_x(20)  # Indent numbered items
+                pdf.multi_cell(0, 6, line.strip(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            elif line.strip():
+                # Regular paragraph text with better spacing
+                pdf.set_font("Helvetica", size=11)
+                pdf.multi_cell(0, 7, line.strip(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            else:
+                # Empty line for spacing between sections
+                pdf.ln(1.5)
+        
+        # Output to file
         pdf.output(filename)
         print(f"--- 📄 PDF saved as: {filename} ---")
-        return filename
+        
+        # Verify file was created
+        if os.path.exists(filename):
+            file_size = os.path.getsize(filename)
+            print(f"--- ✅ PDF file verified: {filename} (size: {file_size} bytes) ---")
+            return filename
+        else:
+            print(f"--- ❌ PDF file was not created: {filename} ---")
+            return None
     except Exception as e:
         print(f"--- ❌ ERROR saving PDF: {e} ---")
-        return "error_saving_pdf.pdf"
+        import traceback
+        traceback.print_exc()
+        return None
 
 def planner_agent_node(state: CampaignState) -> dict:
     print("--- 1. 📋 Calling Planner Agent ---")
@@ -927,14 +1016,35 @@ def _scrape_govt_website(url: str) -> tuple:
     """
     raw = ""
     try:
+        # Try WebBaseLoader first
         loader = WebBaseLoader(url)
         docs = loader.load()
-        if docs:
+        if docs and len(docs[0].page_content) > 100:  # Only trust if we got substantial content
             raw = docs[0].page_content
             print(f"--- 📋 Scraped {len(raw)} chars from govt website ---")
+            truncated = raw[:4000] if raw else "Could not load website."
+            return truncated, raw
     except Exception as e:
-        print(f"--- ⚠️ Could not scrape {url}: {e} ---")
-    truncated = raw[:4000] if raw else "Could not load website."
+        print(f"--- ⚠️ WebBaseLoader failed for {url}: {str(e)[:100]} ---")
+    
+    # Fallback: Try requests + beautifulsoup
+    if not raw:
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            response = requests.get(url, timeout=5, headers=headers)
+            if response.status_code == 200:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(response.content, 'html.parser')
+                # Extract text from main content areas
+                main_content = soup.find(['main', 'article', 'div']) or soup.body
+                if main_content:
+                    raw = main_content.get_text(separator='\n', strip=True)
+                    if raw:
+                        print(f"--- 📋 Scraped {len(raw)} chars (fallback method) ---")
+        except Exception as e:
+            print(f"--- ⚠️ Fallback scrape also failed: {str(e)[:100]} ---")
+    
+    truncated = raw[:4000] if raw else "Could not load website. Using default documents."
     return truncated, raw
 
 
@@ -951,6 +1061,39 @@ def research_agent_node(state: CampaignState) -> dict:
     department_name = jurisdiction_info.get("department_name", "N/A")
     department_url = jurisdiction_info.get("department_url", "N/A")
     registration_steps = state.registration_procedure or []
+
+    # Default fallback with realistic documents for most jurisdictions
+    location_lower = location.lower() if location else ""
+    
+    # Generic but realistic default documents
+    default_documents = [
+        {"document_name": "Business Registration Certificate", "issuing_authority": "Company Registration Office", "purpose": "Legal business entity registration", "deadline_note": "Before business launch"},
+        {"document_name": "Company Incorporation Certificate", "issuing_authority": "State Business Registry", "purpose": "Proof of legal incorporation", "deadline_note": "Required for all startups"},
+        {"document_name": "Tax Registration (GST/VAT)", "issuing_authority": "Tax Authority", "purpose": "Indirect tax compliance", "deadline_note": "30 days after launch (or as per local law)"},
+        {"document_name": "Director/Owner Identification & Address Proof", "issuing_authority": "Government Authority", "purpose": "KYC compliance", "deadline_note": "Before registration"},
+        {"document_name": "Memorandum & Articles of Association", "issuing_authority": "Company", "purpose": "Define company governance rules", "deadline_note": "Required during incorporation"},
+    ]
+    
+    # Location-specific additions
+    if location_lower in ["india", "in"]:
+        default_documents.extend([
+            {"document_name": "DIN (Director Identification Number)", "issuing_authority": "Ministry of Corporate Affairs", "purpose": "Director identification for Indian companies", "deadline_note": "Before incorporating company"},
+            {"document_name": "ROC Registration (Registrar of Companies)", "issuing_authority": "ROC", "purpose": "Official company registration", "deadline_note": "Initial registration mandatory"},
+        ])
+
+    default_result = {
+        "audience_persona": {
+            "pain_point": f"Complex regulatory requirements for {topic} startups in {location}; Need clear guidance on compliance",
+            "motivation": "Streamline business setup and ensure legal compliance",
+            "preferred_channel": "Email guides, webinars, live support"
+        },
+        "core_messaging": {
+            "value_proposition": f"Simplify {topic} startup registration with expert-guided compliance in {location}",
+            "tone_of_voice": "Professional, supportive, transparent",
+            "call_to_action": "Start your journey with confidence"
+        },
+        "required_documents": default_documents
+    }
 
     result = {}
 
@@ -979,17 +1122,23 @@ def research_agent_node(state: CampaignState) -> dict:
             )
 
         # Use the raw govt website content scraped by jurisdiction_agent as
-        # primary product context. This ensures the LLM can extract the actual
-        # documents and steps listed on the official government site.
+        # primary product context.
         raw_govt = state.raw_govt_content or ""
-        if raw_govt:
+        if raw_govt and len(raw_govt) > 100:  # Substantial content available
             scraped_content = (
                 "=== OFFICIAL GOVERNMENT WEBSITE CONTENT (use as primary source for documents) ===\n"
                 + raw_govt[:6000]
             )
             print(f"--- 📄 Feeding {len(raw_govt[:6000])} chars of govt content to research LLM ---")
         else:
-            scraped_content = "No government website content available."
+            print(f"--- ⚠️ Minimal govt content ({len(raw_govt) if raw_govt else 0} chars), using web search + defaults ---")
+            # Use search results as primary source instead
+            scraped_content = (
+                "=== WEB RESEARCH ON REGISTRATION REQUIREMENTS (fallback) ===\n"
+                + str(search_results)[:4000]
+                + "\n\nUse the above research to identify required documents and provide realistic defaults."
+            )
+
         if correction_note:
             scraped_content += correction_note
 
@@ -1006,58 +1155,33 @@ def research_agent_node(state: CampaignState) -> dict:
             "regulatory_news": str(regulatory_news) if regulatory_news else "No recent news.",
         }
 
-        research_chain = research_prompt | llm0 | research_parser
-        research_output: ResearchOutput = research_chain.invoke(research_inputs)
-        research_dict = research_output.model_dump()
+        try:
+            research_chain = research_prompt | llm0 | research_parser
+            research_output: ResearchOutput = research_chain.invoke(research_inputs)
+            research_dict = research_output.model_dump()
 
-        result["audience_persona"] = research_dict["audience_persona"]
-        result["core_messaging"] = research_dict["core_messaging"]
+            result["audience_persona"] = research_dict.get("audience_persona", default_result["audience_persona"])
+            result["core_messaging"] = research_dict.get("core_messaging", default_result["core_messaging"])
 
-        if 'required_documents' in research_dict and research_dict['required_documents']:
-            result['required_documents'] = [
-                doc if isinstance(doc, dict) else doc.model_dump()
-                for doc in research_dict['required_documents']
-            ]
-        else:
-            result['required_documents'] = []
+            if 'required_documents' in research_dict and research_dict['required_documents'] and len(research_dict['required_documents']) > 0:
+                result['required_documents'] = [
+                    doc if isinstance(doc, dict) else doc.model_dump()
+                    for doc in research_dict['required_documents']
+                ]
+            else:
+                result['required_documents'] = default_result['required_documents']
 
-        # Fallback: If no documents were generated but we have raw govt
-        # content, ask the LLM for a quick extraction so we never return 0
-        # documents when the govt site clearly lists requirements.
-        if not result['required_documents'] and state.raw_govt_content and location:
-            print("--- ⚠️ Zero documents from research LLM — attempting fallback extraction ---")
-            try:
-                fallback_chain = ChatPromptTemplate.from_messages([
-                    ("system",
-                     "Extract every required document, licence, permit, or registration form "
-                     "mentioned in the government website text below. Return ONLY valid JSON "
-                     "matching this schema:\n\n{format_instructions}"),
-                    ("human",
-                     "Government website text:\n{govt_text}\n\n"
-                     "Country: {location}\nStartup type: {topic}")
-                ]).partial(format_instructions=research_parser.get_format_instructions())
-                fallback_output = (fallback_chain | llm0 | research_parser).invoke({
-                    "govt_text": state.raw_govt_content[:5000],
-                    "location": location,
-                    "topic": topic,
-                })
-                fallback_docs = fallback_output.model_dump().get("required_documents", [])
-                if fallback_docs:
-                    result['required_documents'] = [
-                        doc if isinstance(doc, dict) else doc.model_dump()
-                        for doc in fallback_docs
-                    ]
-                    print(f"--- ✅ Fallback extraction recovered {len(result['required_documents'])} documents ---")
-            except Exception as fb_err:
-                print(f"--- ❌ Fallback extraction failed: {fb_err} ---")
-
-        print(f"--- ✅ Research Agent Complete: {len(result.get('required_documents', []))} documents found ---")
-        return result
+            print(f"--- ✅ Research Agent Complete: {len(result.get('required_documents', []))} documents found ---")
+            return result
+        except Exception as llm_err:
+            print(f"--- ⚠️ Research LLM failed ({str(llm_err)[:100]}), using defaults ---")
+            return default_result
 
     except Exception as e:
-        print(f"--- ❌ ERROR in Research Agent: {e} ---")
-        pprint.pprint(e)
-        return result if result else {}
+        print(f"--- ❌ ERROR in Research Agent: {str(e)[:100]} ---")
+        print(f"--- ⚠️ Using default fallback values ---")
+        # Return sensible defaults instead of empty dict
+        return default_result
 
 
 def validation_agent_node(state: CampaignState) -> dict:
@@ -1182,14 +1306,26 @@ def validation_agent_node(state: CampaignState) -> dict:
             result["govt_fallback_only"] = False
 
     except Exception as e:
-        print(f"--- ❌ Validation LLM failed: {e} — defaulting to neutral confidence ---")
+        print(f"--- ❌ Validation LLM failed: {e} — generating fallback validation notes ---")
         result["step_confidence"]     = {str(i): 0.6 for i in range(len(steps))}
         result["document_confidence"] = {
             (d.get("document_name", f"doc_{i}") if isinstance(d, dict) else f"doc_{i}"): 0.6
             for i, d in enumerate(docs)
         }
         result["overall_confidence"]  = 0.6
-        result["validation_mismatches"] = []
+        
+        # Generate meaningful fallback validation notes instead of empty list
+        fallback_mismatches = []
+        if len(docs) < 3:
+            fallback_mismatches.append("⚠️ Limited documents found - verify official registration requirements")
+        if len(steps) < 3:
+            fallback_mismatches.append("⚠️ Limited procedure steps found - check official government portal")
+        if not raw_content or len(raw_content) < 100:
+            fallback_mismatches.append("⚠️ Unable to verify against official government website - check source directly")
+        if not fallback_mismatches:
+            fallback_mismatches.append("✓ Documentation review pending - cross-reference with official sources")
+        
+        result["validation_mismatches"] = fallback_mismatches
         result["govt_fallback_only"]  = False
 
     return result
@@ -1300,15 +1436,13 @@ def web_agent_node(state: CampaignState) -> dict:
 
 # --- NEW AGENT NODE (BRD) ---
 def brd_agent_node(state: CampaignState) -> dict:
-    print("--- 7. 📄 Calling BRD Agent (REAL) ---")
+    print("--- 7. 📄 Calling BRD Agent (Generate BRD via Key 3) ---")
     try:
-        inputs = {
-            "topic": state.topic,
-            "goal": state.goal,
-            "audience_persona": state.audience_persona,
-            "core_messaging": state.core_messaging,
-        }
-        print("--- 📄 Generating BRD Markdown... ---")
+        strategy_markdown = state.strategy_markdown or "# Strategic Approach\n\nNo strategy available."
+        
+        # Call BRD agent to generate full BRD based on strategy
+        inputs = {"strategy_markdown": strategy_markdown}
+        print("--- 📄 Generating Business Requirements Document... ---")
         brd_markdown = brd_agent_chain.invoke(inputs)
         
         # Create a directory for outputs if it doesn't exist
@@ -1327,20 +1461,18 @@ def brd_agent_node(state: CampaignState) -> dict:
         pprint.pprint(e)
         return {}
 
-# --- MODIFIED STRATEGY AGENT ---
+# --- MODIFIED STRATEGY AGENT (Uses Key 3) ---
 def strategy_agent_node(state: CampaignState) -> dict:
-    print("--- 3. 📈 Calling Strategy Agent (REAL) ---")
+    print("--- 6. 📈 Calling Strategy Agent (Key 3) ---")
     try:
         inputs = {
             "topic": state.topic,
             "goal": state.goal,
         }
-        print("--- 📈 Generating Strategy Markdown... ---")
+        print("--- 📈 Generating Strategy Markdown via Key 3... ---")
         strategy_markdown = strategy_agent_chain.invoke(inputs)
         
-        # --- NO PDF CONVERSION ---
-        
-        return {"strategy_markdown": strategy_markdown} # <-- Save the raw text
+        return {"strategy_markdown": strategy_markdown}
 
     except Exception as e:
         print(f"--- ❌ ERROR in Strategy Agent: {e} ---")

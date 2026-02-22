@@ -1,5 +1,7 @@
 .env
 .venv/
+keys.txt
+rotate_keys.py
 
 campaign_outputs/
 
