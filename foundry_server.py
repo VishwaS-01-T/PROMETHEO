@@ -1650,7 +1650,6 @@ app.add_middleware(
         "http://localhost:5174",
         "http://127.0.0.1:5174",
         "https://ai-foundry-frontend.vercel.app"
-        "https://ai-foundry-frontend-4yj0w30s0.vercel.app/"
     ],
     allow_credentials=True,
     allow_methods=["*"],
