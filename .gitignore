@@ -1,3 +1,11 @@
 .env
-# Local environment files
-# Add other local ignores below
+.venv/
+
+campaign_outputs/
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.vscode/
+venv/
