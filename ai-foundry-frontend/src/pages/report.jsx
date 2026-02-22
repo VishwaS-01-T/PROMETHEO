@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import BackButton from '../components/BackButton'
 import CardGrid from '../components/cards/CardGrid'
+import Chatbot from '../components/Chatbot'
 
 export default function Report(){
   const loc = useLocation()
@@ -21,6 +22,7 @@ export default function Report(){
   const outputRef = useRef(null)
   const [running, setRunning] = useState(false)
   const [brdUrl, setBrdUrl] = useState(null)
+  const [brdMarkdown, setBrdMarkdown] = useState(null)
   const [strategyMarkdown, setStrategyMarkdown] = useState(null)
 
   // --- Editable inferred plan state ---
@@ -444,6 +446,9 @@ export default function Report(){
               if (jsonData.brd_url) {
                 setBrdUrl(jsonData.brd_url)
               }
+              if (jsonData.brd_markdown) {
+                setBrdMarkdown(jsonData.brd_markdown)
+              }
             }
 
             if (nodeName === 'strategy_agent') {
@@ -815,6 +820,9 @@ export default function Report(){
           </div>
         </div>
       </div>
+
+      {/* Floating BRD Chatbot */}
+      <Chatbot brdMarkdown={brdMarkdown} strategyMarkdown={strategyMarkdown} />
     </div>
   )
 }

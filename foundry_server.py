@@ -142,6 +142,7 @@ class CampaignState(BaseModel):
     
     # --- 6. Filled by BRD_Agent ---
     brd_url: Optional[str] = None
+    brd_markdown: Optional[str] = None  # Raw markdown text of the BRD (used by chatbot)
     
     # --- 7. Filled by Strategy_Agent (MODIFIED) ---
     strategy_markdown: Optional[str] = None # <-- CHANGED
@@ -1454,7 +1455,7 @@ def brd_agent_node(state: CampaignState) -> dict:
         filename = f"{output_dir}/{topic_slug}_brd.pdf"
         pdf_path = save_markdown_as_pdf(brd_markdown, filename)
         
-        return {"brd_url": pdf_path}
+        return {"brd_url": pdf_path, "brd_markdown": brd_markdown}
 
     except Exception as e:
         print(f"--- ❌ ERROR in BRD Agent: {e} ---")
@@ -1878,6 +1879,64 @@ async def deploy_to_vercel(request: DeployRequest):
     except Exception as e:
         print(f"--- ❌ ERROR deploying to Vercel: {e} ---")
         return {"error": str(e)}
+
+
+# --- 8. CHATBOT ENDPOINT (BRD-Grounded Q&A) ---
+
+# Chatbot prompt — answers user questions grounded in BRD + Strategy context
+chatbot_prompt = ChatPromptTemplate.from_messages([
+    (
+        "system",
+        "You are an intelligent assistant for the PROMETHEO campaign platform. "
+        "You answer questions ONLY based on the BRD (Business Requirements Document) and Strategy "
+        "content provided below. If the answer is not in the provided context, say so honestly. "
+        "Be concise, professional, and helpful. Use bullet points when listing items. "
+        "Format your responses in clean Markdown.\n\n"
+        "--- BRD DOCUMENT ---\n{brd_markdown}\n\n"
+        "--- STRATEGY ---\n{strategy_markdown}\n\n"
+        "--- CONVERSATION HISTORY ---\n{history}\n"
+    ),
+    ("human", "{question}"),
+])
+chatbot_chain = chatbot_prompt | llm1 | StrOutputParser()
+print("--- 💬 Chatbot Chain Compiled (BRD-grounded Q&A) ---")
+
+
+class ChatRequest(BaseModel):
+    question: str
+    brd_markdown: Optional[str] = None
+    strategy_markdown: Optional[str] = None
+    history: Optional[List[Dict[str, str]]] = None  # [{"role":"user","content":"..."}, {"role":"assistant","content":"..."}]
+
+
+@app.post("/chat")
+async def chat_endpoint(request: ChatRequest):
+    """Answer user questions grounded in the BRD and strategy documents."""
+    try:
+        brd_context = request.brd_markdown or "No BRD document available yet."
+        strategy_context = request.strategy_markdown or "No strategy document available yet."
+
+        # Format conversation history
+        history_text = ""
+        if request.history:
+            for msg in request.history[-10:]:  # Keep last 10 messages for context window
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                history_text += f"{role.upper()}: {content}\n"
+
+        answer = chatbot_chain.invoke({
+            "brd_markdown": brd_context[:8000],       # Truncate to avoid token limits
+            "strategy_markdown": strategy_context[:4000],
+            "history": history_text,
+            "question": request.question,
+        })
+
+        return {"success": True, "answer": answer}
+
+    except Exception as e:
+        print(f"--- ❌ ERROR in /chat: {e} ---")
+        return {"success": False, "error": str(e)}
+
 
 if __name__ == "__main__":
     print("--- 🚀 Starting FastAPI server on http://localhost:8000 ---")
