@@ -44,7 +44,7 @@ function Navbar() {
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
           >
-            CAMPAIGNAI
+            PROMETHEO
           </motion.a>
 
           {/* Navigation Links */}

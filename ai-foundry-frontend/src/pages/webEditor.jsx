@@ -127,6 +127,23 @@ export default function WebEditor(){
     }
   }
 
+  // Inject a script into srcDoc HTML to fix hash-link navigation inside the iframe
+  const previewHtml = html.replace(
+    '</body>',
+    `<script>
+document.addEventListener('click', function(e) {
+  var a = e.target.closest('a[href^="#"]');
+  if (a) {
+    e.preventDefault();
+    var id = a.getAttribute('href').slice(1);
+    var el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+});
+<\/script>
+</body>`
+  )
+
   return (
     <div className="min-h-screen w-full" style={{ background: 'linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%)' }}>
       <div className="max-w-[1100px] mx-auto px-5 py-6">
@@ -211,7 +228,7 @@ export default function WebEditor(){
               </div>
               <iframe
                 className="w-full h-[520px] bg-white"
-                srcDoc={html}
+                srcDoc={previewHtml}
                 title="Landing Page Preview"
                 sandbox="allow-same-origin allow-scripts"
               />

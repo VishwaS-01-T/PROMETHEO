@@ -17,7 +17,7 @@ cd ai-foundry-frontend
 
 # Install npm dependencies
 echo "📦 Installing npm packages..."
-npm install
+npm i baseline-browser-mapping@latest -D
 
 # Start the frontend
 echo "🌐 Starting frontend development server..."

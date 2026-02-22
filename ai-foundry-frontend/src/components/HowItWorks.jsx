@@ -181,11 +181,11 @@ const HowItWorks = () => {
   ]
 
   return (
-    <section id="learn" className="min-h-screen flex items-center py-6 px-4 sm:px-6 lg:px-8 bg-white">
+    <section id="learn" className="flex items-center pt-2 pb-6 px-4 bg-white">
       <div className="container mx-auto max-w-7xl w-full">
 
         {/* First Way - If you have idea for your startup */}
-        <div className="mb-20">
+        <div className="mb-8">
           <div className="relative">
             {/* Connecting Line - Hidden on mobile */}
             <div className="hidden lg:block absolute top-24 left-0 right-0 pointer-events-none" 
@@ -255,7 +255,7 @@ const HowItWorks = () => {
         </div>
 
         {/* CTA Button */}
-        <div className="flex justify-center mt-16">
+        <div className="flex justify-center mt-8">
           <motion.a
             ref={buttonRef}
             href="/prompt"

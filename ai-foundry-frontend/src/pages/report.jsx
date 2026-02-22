@@ -23,6 +23,20 @@ export default function Report(){
   const [brdUrl, setBrdUrl] = useState(null)
   const [strategyMarkdown, setStrategyMarkdown] = useState(null)
 
+  // --- Editable inferred plan state ---
+  const [confirmed, setConfirmed] = useState(false)
+  const inferredPlan = locationState.inferredPlan || null
+  const [editPlan, setEditPlan] = useState({
+    goal: inferredPlan?.goal || '',
+    topic: inferredPlan?.topic || '',
+    target_audience: inferredPlan?.target_audience || '',
+    company_name: inferredPlan?.company_name || '',
+    source_docs_url: inferredPlan?.source_docs_url || '',
+    campaign_date: inferredPlan?.campaign_date ? inferredPlan.campaign_date.slice(0, 10) : '',
+    location: inferredPlan?.location || locationState.userLocation || '',
+  })
+  const updateField = (key, value) => setEditPlan(prev => ({ ...prev, [key]: value }))
+
   // Add CSS for animations and card styling
   React.useEffect(() => {
     const style = document.createElement('style')
@@ -51,7 +65,7 @@ export default function Report(){
       
       .campaign-card-wrapper {
         position: relative;
-        height: 342px;
+        min-height: 342px;
         width: 100%;
         max-width: 655px;
         margin: 0 auto;
@@ -60,7 +74,7 @@ export default function Report(){
       .campaign-card {
         background: linear-gradient(135deg, #2a1e4a 0%, #1a1a2e 100%);
         width: 100%;
-        height: 100%;
+        min-height: 342px;
         border-radius: 5px;
         position: relative;
         box-shadow: -20px 30px 116px 0 rgba(92, 15, 15, 0.54);
@@ -106,18 +120,31 @@ export default function Report(){
         padding: 30px 20px;
         font-weight: 800;
         position: relative;
-        z-index: 2;
+        z-index: 5;
         transition: transform 0.1s ease-out;
+        width: 100%;
+        box-sizing: border-box;
       }
       
       .campaign-card__content {
-        position: absolute;
         left: 5%;
         right: 5%;
         bottom: 15%;
-        z-index: 2;
+        z-index: 5;
         color: #fff;
         transition: transform 0.1s ease-out;
+      }
+      
+      .campaign-card__content--edit {
+        position: relative;
+        left: auto;
+        right: auto;
+        bottom: auto;
+        padding: 0 5% 20px;
+        z-index: 5;
+        color: #fff;
+        width: 100%;
+        box-sizing: border-box;
       }
       
       .campaign-card__circle,
@@ -157,7 +184,7 @@ export default function Report(){
         position: absolute;
         top: 30%;
         left: 25%;
-        z-index: 3;
+        z-index: 10;
       }
       
       .campaign-card__comet--second {
@@ -191,14 +218,16 @@ export default function Report(){
       }
       
       .campaign-card__field {
-        display: inline-block;
-        margin: 8px 15px;
-        padding: 8px 16px;
+        display: block;
+        padding: 8px 12px;
         background: rgba(255, 255, 255, 0.1);
         border-radius: 8px;
         border: 1px solid rgba(168, 85, 247, 0.3);
         backdrop-filter: blur(10px);
         transition: all 0.3s ease;
+        box-sizing: border-box;
+        overflow: hidden;
+        min-width: 0;
       }
       
       .campaign-card__field:hover {
@@ -220,6 +249,18 @@ export default function Report(){
         font-size: 13px;
         color: #fff;
         font-weight: 300;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+        display: block;
+      }
+      .campaign-card__field-value a {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+        max-width: 100%;
       }
     `
     document.head.appendChild(style)
@@ -244,7 +285,11 @@ export default function Report(){
       const comet = document.querySelector('.campaign-card__cometOuter')
       
       if (smallCircle) smallCircle.style.transform = `translate(${e.clientX * 0.03}px, ${e.clientY * 0.03}px)`
-      if (content) content.style.transform = `translate(${e.clientX * 0.03}px, ${e.clientY * 0.03}px)`
+      if (content) {
+        const isConfirmed = document.querySelector('.campaign-card__content--readonly')
+        const xOff = isConfirmed ? (e.clientX * 0.03) - 50 : (e.clientX * 0.03)
+        content.style.transform = `translate(${xOff}px, ${e.clientY * 0.03}px)`
+      }
       if (orangeShine) orangeShine.style.transform = `translate(${e.clientX * 0.09}px, ${e.clientY * 0.09}px)`
       if (circle) circle.style.transform = `translate(${e.clientX * 0.05}px, ${e.clientY * 0.05}px)`
       if (title) title.style.transform = `translate(${e.clientX * 0.03}px, ${e.clientY * 0.03}px)`
@@ -269,17 +314,14 @@ export default function Report(){
     setLogNodes((prev) => [...prev, { id: Date.now() + Math.random(), html: htmlContent, isSeparator }])
   }
 
-  // connect on mount and auto-start if navigated from PromptPage
+  // connect on mount — but do NOT auto-start agents; wait for user confirm
   useEffect(() => {
-    addOutputMessage('<strong>STATUS:</strong> Connecting...')
-    connect()
-    
-    // Auto-run if autoStart flag is set from PromptPage
-    if (locationState.autoStart && prompt) {
-      setTimeout(() => {
-        sendPrompt();
-      }, 1000);
+    if (inferredPlan) {
+      addOutputMessage('<strong>STATUS:</strong> Inferred plan loaded. Review and confirm to start agents.')
+    } else {
+      addOutputMessage('<strong>STATUS:</strong> Connecting...')
     }
+    connect()
     
     return () => {
       if (wsRef.current) wsRef.current.close()
@@ -309,7 +351,7 @@ export default function Report(){
         if (message.event === 'step') {
           const nodeName = message.node
           try {
-            const jsonData = JSON.parse(message.data)
+            const jsonData = typeof message.data === 'string' ? JSON.parse(message.data) : message.data
             setJsonState(jsonData)
             if (nodeName === 'planner_agent') {
               const plannerFields = {
@@ -318,7 +360,8 @@ export default function Report(){
                 target_audience: jsonData.target_audience || null,
                 company_name: jsonData.company_name || null,
                 source_docs_url: jsonData.source_docs_url || null,
-                campaign_date: jsonData.campaign_date || null
+                campaign_date: jsonData.campaign_date || null,
+                location: jsonData.location || null
               }
               setPlannerData(plannerFields)
               try {
@@ -328,14 +371,35 @@ export default function Report(){
               }
             }
 
+            if (nodeName === 'jurisdiction_agent') {
+              // Jurisdiction discovered — update research data with jurisdiction info
+              const jurisdictionFields = {
+                jurisdiction_info: jsonData.jurisdiction_info || null,
+                registration_procedure: jsonData.registration_procedure || []
+              }
+              setResearchData(prev => ({ ...(prev || {}), ...jurisdictionFields }))
+              try {
+                localStorage.setItem('campaign_jurisdiction', JSON.stringify(jurisdictionFields))
+              } catch (e) {
+                console.error('Failed saving jurisdiction to storage', e)
+              }
+            }
+
             if (nodeName === 'research_agent') {
               const researchFields = {
                 audience_persona: jsonData.audience_persona || {},
-                core_messaging: jsonData.core_messaging || {}
+                core_messaging: jsonData.core_messaging || {},
+                required_documents: jsonData.required_documents || [],
               }
-              setResearchData(researchFields)
+              // Merge with existing jurisdiction data already set by jurisdiction_agent
+              setResearchData(prev => ({
+                ...(prev || {}),
+                ...researchFields,
+                jurisdiction_info: prev?.jurisdiction_info || jsonData.jurisdiction_info || null,
+                registration_procedure: prev?.registration_procedure || jsonData.registration_procedure || []
+              }))
               try {
-                localStorage.setItem('campaign_research', JSON.stringify({ researchData: researchFields }))
+                localStorage.setItem('campaign_research', JSON.stringify({ researchData: { ...researchFields, jurisdiction_info: jsonData.jurisdiction_info, registration_procedure: jsonData.registration_procedure } }))
               } catch (e) {
                 console.error('Failed saving research to storage', e)
               }
@@ -388,9 +452,39 @@ export default function Report(){
               }
             }
 
+            if (nodeName === 'validation_agent') {
+              // Merge validation fields into researchData
+              const validationFields = {
+                step_confidence: jsonData.step_confidence || {},
+                document_confidence: jsonData.document_confidence || {},
+                overall_confidence: jsonData.overall_confidence ?? 1.0,
+                validation_mismatches: jsonData.validation_mismatches || [],
+                govt_fallback_only: jsonData.govt_fallback_only || false,
+                validation_rounds: jsonData.validation_rounds || 0,
+                raw_govt_content: jsonData.raw_govt_content || null,
+                // pick up any corrected docs/steps from the validation loop
+                ...(jsonData.required_documents ? { required_documents: jsonData.required_documents } : {}),
+                ...(jsonData.registration_procedure ? { registration_procedure: jsonData.registration_procedure } : {}),
+              }
+              setResearchData(prev => ({ ...(prev || {}), ...validationFields }))
+              try {
+                localStorage.setItem('campaign_research', JSON.stringify({
+                  researchData: { ...(JSON.parse(localStorage.getItem('campaign_research') || '{}').researchData || {}), ...validationFields }
+                }))
+              } catch (e) {
+                console.error('Failed saving validation to storage', e)
+              }
+            }
+
             let snippet = `Updated landing_page_url: ${jsonData.landing_page_url}`
             if (nodeName === 'planner_agent') snippet = `Planned topic: ${jsonData.topic}`
+            if (nodeName === 'jurisdiction_agent') snippet = `Jurisdiction: ${jsonData.jurisdiction_info?.department_name || 'Discovering...'}`
             if (nodeName === 'research_agent') snippet = `Found pain point: ${jsonData.audience_persona?.pain_point || 'N/A'}`
+            if (nodeName === 'validation_agent') {
+              const conf = jsonData.overall_confidence ?? 1.0
+              const rounds = jsonData.validation_rounds || 0
+              snippet = `Confidence: ${(conf * 100).toFixed(0)}% (round ${rounds})${jsonData.govt_fallback_only ? ' — GOVT FALLBACK' : ''}`
+            }
             if (nodeName === 'content_agent') snippet = `Wrote ${jsonData.email_sequence?.length || 0} emails.`
             if (nodeName === 'design_agent') snippet = `Created logo prompt: ${jsonData.brand_kit?.logo_prompt || 'N/A'}`
 
@@ -444,8 +538,27 @@ export default function Report(){
     setJsonState({})
     addOutputMessage('<strong>STATUS:</strong> Sending prompt to Foundry...', true)
 
-    ws.send(JSON.stringify({ initial_prompt: prompt }))
+    // Build payload with all confirmed plan fields so the planner agent skips LLM
+    const payload = { initial_prompt: prompt }
+    if (editPlan.goal) payload.goal = editPlan.goal
+    if (editPlan.topic) payload.topic = editPlan.topic
+    if (editPlan.target_audience) payload.target_audience = editPlan.target_audience
+    if (editPlan.company_name) payload.company_name = editPlan.company_name
+    if (editPlan.source_docs_url) payload.source_docs_url = editPlan.source_docs_url
+    if (editPlan.campaign_date) payload.campaign_date = editPlan.campaign_date
+    if (editPlan.location) payload.location = editPlan.location
+
+    ws.send(JSON.stringify(payload))
     setRunning(true)
+  }
+
+  // Called when user clicks "Confirm Plan"
+  function confirmPlan() {
+    setConfirmed(true)
+    // Set plannerData from the confirmed edit so the card switches to read-only display
+    setPlannerData({ ...editPlan })
+    addOutputMessage('<strong>STATUS:</strong> Plan confirmed! Starting all agents...', true)
+    sendPrompt()
   }
 
   /* --------------------
@@ -519,33 +632,116 @@ export default function Report(){
               <div className="campaign-card__orangeShine"></div>
               <div className="campaign-card__greenShine"></div>
               
-              <div className="campaign-card__title">
-                Campaign Plan
+              <div className="campaign-card__title" style={{fontSize: confirmed ? 36 : 32, padding: confirmed ? '14px 20px 6px' : '18px 20px'}}>
+                {confirmed ? 'Campaign Plan' : 'Review & Edit Plan'}
               </div>
               
-              {plannerData ? (
-                <div className="campaign-card__content">
-                  <div className="campaign-card__field">
-                    <div className="campaign-card__field-label">Goal</div>
-                    <div className="campaign-card__field-value">{plannerData.goal || '—'}</div>
+              {/* EDITABLE MODE — before confirm */}
+              {!confirmed && inferredPlan && (
+                <div className="campaign-card__content campaign-card__content--edit">
+                  <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px 12px', width:'100%', boxSizing:'border-box'}}>
+                    {[
+                      {key:'goal', label:'Goal', required:true},
+                      {key:'topic', label:'Topic', required:true},
+                      {key:'target_audience', label:'Audience', required:true},
+                      {key:'company_name', label:'Company', required:true},
+                      {key:'location', label:'Location', required:true},
+                      {key:'campaign_date', label:'Date', type:'date', required:true},
+                    ].map(f => (
+                      <div key={f.key} className="campaign-card__field" style={{margin:'0', padding:'6px 10px', display:'block'}}>
+                        <div className="campaign-card__field-label" style={{fontSize:9, marginBottom:2}}>{f.label}{f.required && <span style={{color:'#ef4444', marginLeft:2}}>*</span>}</div>
+                        <input
+                          type={f.type || 'text'}
+                          value={editPlan[f.key]}
+                          onChange={e => updateField(f.key, e.target.value)}
+                          className="campaign-card__field-value"
+                          style={{
+                            background:'transparent', border:'none', borderBottom:'1px solid rgba(168,85,247,0.4)',
+                            color:'#fff', fontFamily: 'Urbanist, sans-serif', fontSize:12, fontWeight:300,
+                            width:'100%', outline:'none', padding:'2px 0',
+                          }}
+                        />
+                      </div>
+                    ))}
                   </div>
-                  <div className="campaign-card__field">
-                    <div className="campaign-card__field-label">Topic</div>
-                    <div className="campaign-card__field-value">{plannerData.topic || '—'}</div>
+                  {/* Source docs URL — full width */}
+                  <div className="campaign-card__field" style={{margin:'8px 0 0', padding:'6px 10px', width:'100%', display:'block', boxSizing:'border-box'}}>
+                    <div className="campaign-card__field-label" style={{fontSize:9, marginBottom:2}}>Source URL</div>
+                    <input
+                      type="url"
+                      value={editPlan.source_docs_url}
+                      onChange={e => updateField('source_docs_url', e.target.value)}
+                      placeholder="https://..."
+                      className="campaign-card__field-value"
+                      style={{
+                        background:'transparent', border:'none', borderBottom:'1px solid rgba(168,85,247,0.4)',
+                        color:'#fff', fontFamily:'Urbanist, sans-serif', fontSize:12, fontWeight:300,
+                        width:'100%', outline:'none', padding:'2px 0',
+                      }}
+                    />
                   </div>
-                  <div className="campaign-card__field">
-                    <div className="campaign-card__field-label">Audience</div>
-                    <div className="campaign-card__field-value">{plannerData.target_audience || '—'}</div>
-                  </div>
-                  <div className="campaign-card__field">
-                    <div className="campaign-card__field-label">Date</div>
-                    <div className="campaign-card__field-value">
-                      {plannerData.campaign_date ? new Date(plannerData.campaign_date).toLocaleDateString() : 'TBD'}
+                </div>
+              )}
+
+              {/* READ-ONLY MODE — after confirm (or from WS planner_agent) */}
+              {confirmed && plannerData && (
+                <div className="campaign-card__content campaign-card__content--readonly" style={{position:'relative', marginTop:'4px', padding:'0 5%'}}>
+                  <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 10px', width:'100%', boxSizing:'border-box'}}>
+                    <div className="campaign-card__field">
+                      <div className="campaign-card__field-label">Goal</div>
+                      <div className="campaign-card__field-value" title={plannerData.goal || ''}>{plannerData.goal || '—'}</div>
+                    </div>
+                    <div className="campaign-card__field">
+                      <div className="campaign-card__field-label">Topic</div>
+                      <div className="campaign-card__field-value" title={plannerData.topic || ''}>{plannerData.topic || '—'}</div>
+                    </div>
+                    <div className="campaign-card__field">
+                      <div className="campaign-card__field-label">Audience</div>
+                      <div className="campaign-card__field-value" title={plannerData.target_audience || ''}>{plannerData.target_audience || '—'}</div>
+                    </div>
+                    <div className="campaign-card__field">
+                      <div className="campaign-card__field-label">Company</div>
+                      <div className="campaign-card__field-value" title={plannerData.company_name || ''}>{plannerData.company_name || '—'}</div>
+                    </div>
+                    <div className="campaign-card__field">
+                      <div className="campaign-card__field-label">Location</div>
+                      <div className="campaign-card__field-value" title={plannerData.location || ''}>{plannerData.location || '—'}</div>
+                    </div>
+                    <div className="campaign-card__field">
+                      <div className="campaign-card__field-label">Date</div>
+                      <div className="campaign-card__field-value">
+                        {plannerData.campaign_date ? new Date(plannerData.campaign_date).toLocaleDateString() : '—'}
+                      </div>
+                    </div>
+                    <div className="campaign-card__field" style={{gridColumn:'1 / -1'}}>
+                      <div className="campaign-card__field-label">Jurisdiction</div>
+                      <div className="campaign-card__field-value" title={researchData?.jurisdiction_info?.department_name || 'Discovering...'}>
+                        {researchData?.jurisdiction_info && researchData.jurisdiction_info.department_name !== 'Unknown' ? (
+                          researchData.jurisdiction_info.department_url ? (
+                            <a
+                              href={researchData.jurisdiction_info.department_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{color:'#a78bfa', textDecoration:'underline', cursor:'pointer'}}
+                              title={researchData.jurisdiction_info.department_name}
+                            >
+                              {researchData.jurisdiction_info.department_name}
+                            </a>
+                          ) : (
+                            researchData.jurisdiction_info.department_name
+                          )
+                        ) : (
+                          <span style={{color:'rgba(168,85,247,0.6)', fontStyle:'italic'}}>Discovering...</span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
-              ) : (
-                <div className="campaign-card__content">
+              )}
+
+              {/* No plan at all */}
+              {!confirmed && !inferredPlan && (
+                <div className="campaign-card__content" style={{position:'absolute',right:'-10px'}}>
                   <div style={{textAlign: 'center', opacity: 0.6, fontStyle: 'italic'}}>
                     Waiting for Campaign Plan...
                   </div>
@@ -553,6 +749,26 @@ export default function Report(){
               )}
             </div>
           </div>
+
+          {/* Confirm Button — bottom-left of card area */}
+          {!confirmed && inferredPlan && (
+            <div className="flex justify-start mt-4">
+              <button
+                onClick={confirmPlan}
+                disabled={!editPlan.goal || !editPlan.topic || !editPlan.target_audience || !editPlan.company_name || !editPlan.location || !editPlan.campaign_date}
+                className="px-8 py-3 rounded-xl font-bold text-white transition-all hover:scale-105 disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{
+                  background: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)',
+                  fontFamily: 'Urbanist, sans-serif',
+                  fontWeight: 800,
+                  letterSpacing: '0.5px',
+                  boxShadow: '0 4px 20px rgba(139, 92, 246, 0.4)',
+                }}
+              >
+                Confirm & Launch Agents
+              </button>
+            </div>
+          )}
 
           {/* Cards 2x2 */}
           <div className="mt-12">

@@ -27,11 +27,23 @@ from fpdf import FPDF # <-- NEW IMPORT
 
 load_dotenv()
 
-_grok_key = os.getenv("GROQ_API_KEY")
-if _grok_key:
-    print("--- 🔐 GROQ_API_KEY loaded from environment/.env ---")
+_grok_key0 = os.getenv("GROQ_API_KEY0")
+if _grok_key0:
+    print("--- 🔐 GROQ_API_KEY0 loaded — jurisdiction, research ---")
 else:
-    print("--- ⚠️  GROQ_API_KEY not found. Set GROQ_API_KEY in your environment or .env file. ---")
+    print("--- ⚠️  GROQ_API_KEY0 not found. Set GROQ_API_KEY0 in your environment or .env file. ---")
+
+_grok_key1 = os.getenv("GROQ_API_KEY1")
+if _grok_key1:
+    print("--- 🔐 GROQ_API_KEY1 loaded — planner, strategy, brd ---")
+else:
+    print("--- ⚠️  GROQ_API_KEY1 not found. Set GROQ_API_KEY1 in your environment or .env file. ---")
+
+_grok_key2 = os.getenv("GROQ_API_KEY2")
+if _grok_key2:
+    print("--- 🔐 GROQ_API_KEY2 loaded — content, web ---")
+else:
+    print("--- ⚠️  GROQ_API_KEY2 not found. Set GROQ_API_KEY2 in your environment or .env file. ---")
 
 _tavily_key = os.getenv("TAVILY_API_KEY")
 if _tavily_key:
@@ -46,8 +58,14 @@ else:
     print("--- ⚠️  UNSPLASH_ACCESS_KEY not found. Set UNSPLASH_ACCESS_KEY in your environment or .env file. ---")
 
 
-llm = ChatGroq(model_name="llama-3.1-8b-instant", temperature=0)
-print(f"--- 🤖 Groq LLM Initialized (llama-3.1-8b-instant) ---") 
+llm0 = ChatGroq(model_name="openai/gpt-oss-20b", temperature=0, api_key=_grok_key0)
+print(f"--- 🤖 Groq LLM (Key 0) Initialized — jurisdiction, research ---")
+
+llm1 = ChatGroq(model_name="openai/gpt-oss-20b", temperature=0, api_key=_grok_key1)
+print(f"--- 🤖 Groq LLM (Key 1) Initialized — planner, strategy, brd ---")
+
+llm2 = ChatGroq(model_name="openai/gpt-oss-20b", temperature=0, api_key=_grok_key2)
+print(f"--- 🤖 Groq LLM (Key 2) Initialized — content, web ---") 
 
 class EmailStep(BaseModel):
     """A single email in the nurture sequence"""
@@ -77,12 +95,17 @@ class CampaignState(BaseModel):
     goal: Optional[str] = None
     topic: Optional[str] = None
     target_audience: Optional[str] = None
+    company_name: Optional[str] = None
     source_docs_url: Optional[str] = None
     campaign_date: Optional[datetime] = None
+    location: Optional[str] = None
 
     # --- 2. Filled by Research_Agent ---
     audience_persona: Optional[Dict[str, str]] = None
     core_messaging: Optional[Dict[str, str]] = None
+    jurisdiction_info: Optional[Dict[str, str]] = None  # {department_name, department_url, jurisdiction_type}
+    registration_procedure: Optional[List[str]] = None  # Step-by-step procedure from the department website
+    required_documents: Optional[List[Dict[str, str]]] = None  # Location-specific legal/regulatory documents
 
     # --- 3. Filled by Content_Agent ---
     webinar_details: Optional[Dict[str, str]] = None # {title, abstract}
@@ -105,6 +128,15 @@ class CampaignState(BaseModel):
     # --- 7. Filled by Strategy_Agent (MODIFIED) ---
     strategy_markdown: Optional[str] = None # <-- CHANGED
     
+    # --- 9. Filled by Validation Agent ---
+    raw_govt_content: Optional[str] = None          # raw text scraped from govt website (always preserved)
+    validation_rounds: int = 0                       # how many re-validation loops we've done
+    step_confidence: Dict[str, float] = {}           # {"0": 0.9, "1": 0.4, ...} keyed by step index str
+    document_confidence: Dict[str, float] = {}       # {"Certificate of Incorporation": 0.87, ...}
+    validation_mismatches: List[str] = []            # mismatch/gap descriptions fed back into research
+    govt_fallback_only: bool = False                 # True → frontend shows ONLY raw govt scrape
+    overall_confidence: float = 1.0                  # aggregate 0.0–1.0 confidence score
+    
     # --- 8. Filled by Ops_Agent ---
     automation_status: Dict[str, Any] = {}  # Changed from Dict[str, str] to Dict[str, Any] to support complex data
     
@@ -121,8 +153,10 @@ class PlannerOutput(BaseModel):
     goal: str = Field(description="The primary objective, e.g., 'Launch a webinar', 'Promote a whitepaper'.")
     topic: str = Field(description="The main subject or product feature, e.g., 'Agentic-Fix'.")
     target_audience: str = Field(description="The specific user persona, e.g., 'VPs of Engineering'.")
+    company_name: Optional[str] = Field(description="The company/brand name to display on generated assets. Infer from brief if present; otherwise null.")
     source_docs_url: Optional[str] = Field(description="The URL (e.g., Notion) containing the source content, if provided.")
     campaign_date: Optional[datetime] = Field(description="The target date for the campaign, in YYYY-MM-DD format. Infer from context. If not mentioned, leave as null.")
+    location: Optional[str] = Field(default=None, description="The country or region for the campaign. Infer from brief if present; otherwise null.")
 
 planner_parser = PydanticOutputParser(pydantic_object=PlannerOutput)
 planner_prompt = ChatPromptTemplate.from_messages(
@@ -144,48 +178,216 @@ planner_prompt = ChatPromptTemplate.from_messages(
         ),
     ]
 ).partial(format_instructions=planner_parser.get_format_instructions())
-planner_chain = planner_prompt | llm | planner_parser
+planner_chain = planner_prompt | llm1 | planner_parser
 print("--- 📋 Planner Agent LCEL Chain Compiled ---")
 
 
-# --- 3.2: RESEARCH AGENT SCHEMA & CHAIN (Simplified) ---
+# --- 3.2: RESEARCH AGENT — MULTI-STEP (Jurisdiction → Scrape → Documents) ---
+
+# --- Step 1 Models: Jurisdiction Discovery ---
+class JurisdictionInfo(BaseModel):
+    """The specific government department/authority that oversees startup registration."""
+    department_name: str = Field(description="The exact official name of the government department or regulatory body.")
+    department_url: str = Field(description="The official website URL of this department (must be a real, valid URL).")
+    jurisdiction_type: str = Field(description="The type of jurisdiction, e.g., 'Company Registration', 'Business Licensing', 'Startup Registration'.")
+
+jurisdiction_parser = PydanticOutputParser(pydantic_object=JurisdictionInfo)
+jurisdiction_prompt = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            "You are an expert in international business law and startup regulations. "
+            "Given a country and a startup topic/industry, identify the EXACT government department "
+            "or regulatory body that handles company registration and startup licensing in that country. "
+            "Return the department's official name and its real website URL. "
+            "Respond ONLY with the required JSON object, with no other text."
+            "\n\n{format_instructions}"
+        ),
+        (
+            "human",
+            "Country: {location}\n"
+            "Startup Industry/Topic: {topic}\n"
+            "Company Name: {company_name}\n\n"
+            "Web search results about the regulatory body:\n{jurisdiction_search}\n\n"
+            "Identify the specific government department that handles startup/company registration "
+            "for this type of business in {location}. Provide its exact official name and website URL."
+        ),
+    ]
+).partial(format_instructions=jurisdiction_parser.get_format_instructions())
+print("--- 🏛️  Jurisdiction Discovery Chain Compiled ---")
+
+
+# --- Step 2: Department Website Procedure Extraction ---
+class ProcedureOutput(BaseModel):
+    """Registration procedure extracted from the department website."""
+    registration_steps: List[str] = Field(description="An ordered list of step-by-step instructions for registering a startup, as found on the department's website.")
+
+procedure_parser = PydanticOutputParser(pydantic_object=ProcedureOutput)
+procedure_prompt = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            "You are an expert at reading government websites and extracting registration procedures. "
+            "Given information scraped from a government department's website, extract the exact "
+            "step-by-step procedure to register/apply for a startup or company in that jurisdiction. "
+            "Each step should be a clear, actionable instruction. "
+            "Respond ONLY with the required JSON object, with no other text."
+            "\n\n{format_instructions}"
+        ),
+        (
+            "human",
+            "Department: {department_name} ({department_url})\n"
+            "Country: {location}\n"
+            "Startup Topic: {topic}\n\n"
+            "--- WEBSITE CONTENT ---\n{website_content}\n\n"
+            "--- ADDITIONAL SEARCH RESULTS ---\n{procedure_search}\n\n"
+            "Extract the step-by-step registration/application procedure for this type of startup. "
+            "Include all necessary steps: name reservation, document preparation, filing, fees, timelines, etc."
+        ),
+    ]
+).partial(format_instructions=procedure_parser.get_format_instructions())
+print("--- 📋 Procedure Extraction Chain Compiled ---")
+
+
+# --- Step 3 Models: Full Research Output with Documents ---
+class RequiredDocument(BaseModel):
+    """A regulatory or legal document required for the campaign in the target country."""
+    document_name: str = Field(description="The official name of the required document or permit.")
+    issuing_authority: str = Field(description="The government body or authority that issues this document.")
+    purpose: str = Field(description="Why this document is needed for the campaign.")
+    deadline_note: str = Field(description="When this document should be obtained relative to the campaign date (e.g., '30 days before launch').")
+
 class ResearchOutput(BaseModel):
     audience_persona: Dict[str, str] = Field(description="A 3-key dictionary describing the target audience, with keys 'pain_point', 'motivation', and 'preferred_channel'.")
     core_messaging: Dict[str, str] = Field(description="A 3-key dictionary for the marketing strategy, with keys 'value_proposition', 'tone_of_voice', and 'call_to_action'.")
+    required_documents: List[RequiredDocument] = Field(default_factory=list, description="A list of regulatory, legal, or compliance documents required to launch this startup in the specified country by the campaign date. Derive these from the registration procedure and department website. If no location is provided, return an empty list.")
 
 research_parser = PydanticOutputParser(pydantic_object=ResearchOutput)
-tavily_tool = TavilySearch(max_results=3) 
+tavily_tool = TavilySearch(max_results=5)
 research_prompt = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            "You are a world-class marketing strategist. Your job is to synthesize "
-            "product information and audience research into a clear marketing strategy. "
+            "You are a world-class marketing strategist with expertise in international compliance. "
+            "Your job is to synthesize product information and audience research into a clear marketing strategy, "
+            "AND to generate the exact list of required documents based on the registration procedure "
+            "and regulatory research for the target country. "
+            "Today's date is " + str(datetime.now().date()) + ". "
+            "Factor in any recent regulatory changes or upcoming deadlines relative to the campaign date. "
             "Respond ONLY with the required JSON object, with no other text."
             "\n\n{format_instructions}"
         ),
         (
             "human",
             "--- PRODUCT CONTEXT ---\n"
-            "{scraped_content}\n\n" 
+            "{scraped_content}\n\n"
             "--- AUDIENCE RESEARCH ---\n"
             "Topic: {topic}, Audience: {target_audience}\n"
             "Research Results:\n{search_results}\n\n"
-            "--- SYNTHESIS ---"
-            "Based on all this info, generate the **audience_persona** and **core_messaging**."
+            "--- JURISDICTION & PROCEDURE ---\n"
+            "Government Department: {department_name} ({department_url})\n"
+            "Registration Procedure:\n{registration_procedure}\n\n"
+            "--- CAMPAIGN LOCATION & DATE ---\n"
+            "Location/Country: {location}\n"
+            "Campaign Launch Date: {campaign_date}\n"
+            "Recent Regulatory News:\n{regulatory_news}\n\n"
+            "--- SYNTHESIS ---\n"
+            "Based on all this info:\n"
+            "1. Generate the **audience_persona** and **core_messaging**.\n"
+            "2. Generate **required_documents**: List ALL legal, regulatory, and compliance documents "
+            "required to launch this startup in {location} by {campaign_date}. "
+            "Base these on the registration procedure steps above. "
+            "Include company registration forms, tax registrations, data protection filings, "
+            "industry-specific licenses, advertising approvals, etc. "
+            "For each document, specify the exact issuing authority from the procedure. "
+            "If no location is provided, return an empty list for required_documents."
         ),
     ]
 ).partial(format_instructions=research_parser.get_format_instructions())
-research_search_only_chain = (
-    RunnablePassthrough.assign(
-        scraped_content=lambda x: "No document provided.", # Default content
-        search_results=lambda x: tavily_tool.invoke(f"common pain points for {x['target_audience']} related to {x['topic']}")
+print("--- 🧠 Research Agent LCEL Chain Compiled (Multi-Step) ---")
+
+
+# --- 3.2.5: VALIDATION AGENT MODEL & CHAIN ---
+
+MAX_VALIDATION_ROUNDS = 2         # hard ceiling on re-validation loops
+CONFIDENCE_THRESHOLD  = 0.68      # below this we re-run research if rounds allow
+
+class ValidationOutput(BaseModel):
+    """Structured output from the validation agent."""
+    is_validated: bool = Field(
+        description="True if the generated docs/steps closely match what the govt website specifies."
     )
-    | research_prompt
-    | llm
-    | research_parser
-)
-print("--- 🧠 Research Agent LCEL Chain Compiled (Search-Only) ---")
+    overall_confidence: float = Field(
+        description="Aggregate confidence 0.0-1.0 across all steps and documents."
+    )
+    step_confidence: Dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "Confidence score per registration step, keyed by step index as a string "
+            "('0', '1', …). Score is 0.0-1.0."
+        )
+    )
+    document_confidence: Dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "Confidence score per required document, keyed by document_name. Score is 0.0-1.0."
+        )
+    )
+    mismatches: List[str] = Field(
+        default_factory=list,
+        description=(
+            "List of specific discrepancies found: wrong document names, wrong issuing authorities, "
+            "missing steps, extra/invented documents not mentioned by the govt website, etc."
+        )
+    )
+    missing_docs: List[str] = Field(
+        default_factory=list,
+        description="Document names that appear on the govt site but are absent from required_documents."
+    )
+    missing_steps: List[str] = Field(
+        default_factory=list,
+        description="Registration steps found in web research that are absent from registration_procedure."
+    )
+
+validation_parser = PydanticOutputParser(pydantic_object=ValidationOutput)
+
+validation_prompt = ChatPromptTemplate.from_messages([
+    (
+        "system",
+        "You are a meticulous compliance auditor specialising in startup registration procedures. "
+        "You are given:\n"
+        "  A) The raw text scraped directly from the government department's website — treat this as GROUND TRUTH.\n"
+        "  B) A structured list of registration steps extracted by an AI from that scrape.\n"
+        "  C) A list of required documents generated by an AI research agent.\n"
+        "  D) Independent web-search results that cross-reference the above.\n\n"
+        "Your job:\n"
+        "  1. Compare B and C against A and D.\n"
+        "  2. Assign a confidence score (0.0-1.0) to EACH step and EACH document.\n"
+        "     – 1.0 = explicitly confirmed on govt website or multiple authoritative sources.\n"
+        "     – 0.7 = mentioned in web search but not explicitly on govt site.\n"
+        "     – 0.4 = plausible but not verified.\n"
+        "     – 0.1 = contradicted or clearly hallucinated.\n"
+        "  3. List ALL mismatches: wrong names, wrong authorities, extra invented docs, wrong order.\n"
+        "  4. List documents present on the govt site but missing from the AI list.\n"
+        "  5. Set is_validated=True ONLY if overall_confidence >= 0.75 and no critical mismatches.\n\n"
+        "CRITICAL: The raw govt website content in section A is the single source of truth. "
+        "Never trust AI-generated content over what the govt site explicitly states.\n\n"
+        "{format_instructions}"
+    ),
+    (
+        "human",
+        "=== A) RAW GOVERNMENT WEBSITE CONTENT (SOURCE OF TRUTH) ===\n{raw_govt_content}\n\n"
+        "=== B) AI-EXTRACTED REGISTRATION STEPS ===\n{registration_steps}\n\n"
+        "=== C) AI-GENERATED REQUIRED DOCUMENTS ===\n{required_documents}\n\n"
+        "=== D) INDEPENDENT WEB-SEARCH CROSS-REFERENCE ===\n{web_search_results}\n\n"
+        "Country/Jurisdiction: {location}\n"
+        "Startup Type: {topic}\n\n"
+        "Audit all items. Return ONLY the JSON validation report."
+    )
+]).partial(format_instructions=validation_parser.get_format_instructions())
+
+validation_chain = validation_prompt | llm0 | validation_parser
+print("--- 🔍 Validation Agent Chain Compiled ---")
 
 
 # --- 3.3: CONTENT AGENT SCHEMA & CHAIN (MODIFIED) ---
@@ -224,7 +426,7 @@ content_prompt = ChatPromptTemplate.from_messages(
         ),
     ]
 ).partial(format_instructions=content_parser.get_format_instructions())
-content_chain = content_prompt | llm | content_parser
+content_chain = content_prompt | llm2 | content_parser
 print("--- ✍️  Content Agent LCEL Chain Compiled ---")
 
 
@@ -251,33 +453,163 @@ def get_unsplash_image(search_query: str) -> str:
 
 
 # --- 3.5: WEB AGENT (MODIFIED) ---
-web_agent_prompt = ChatPromptTemplate.from_messages(
+# We hard-code the HTML boilerplate (doctype/head/sticky navbar/footer) to guarantee consistency,
+# and let the LLM generate only the 3 in-page sections.
+web_sections_prompt = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            "You are a world-class UI/UX designer and frontend developer... "
-            "You have complete creative freedom... "
-            "You MUST use inline CSS for all styling (inside a `<style>` tag in the `<head>`). "
-            "Your response MUST be ONLY the complete HTML code..."
+            "Output ONLY raw HTML: three <section> tags with ids home, about, contact. "
+            "No <html>/<head>/<body>/<style> wrappers. No buttons/forms/inputs. No commentary."
         ),
         (
             "human",
-            "Please generate the HTML for a promotional landing page... "
-            "\n\n--- CAMPAIGN STRATEGY ---"
-            "\n- Topic: {topic}"
-            "\n- Audience Persona: {audience_persona}"
-            "\n- Core Messaging: {core_messaging}"
-            "\n\n--- BRAND ASSETS ---"
-            "\n- All Available Images: {generated_assets}"
-            "\n\n--- REQUIREMENTS ---"
-            "\n1. Create a beautiful, multi-section page including: a Hero (using the 'webinar_banner_url'), a 'Problem' section (based on pain_point), a 'Solution' section (introducing the topic), and a 'Who Is This For' section."
-            "\n2. Use the *other* images (e.g., 'post_1_image_url') in the other sections or in a small gallery to make the page more visually appealing."
-            "\n3. This is a promotional-only website. It must *not* have any buttons, 'Sign Up' forms, input fields, or 'mailto:' links."
+            "Topic: {topic}\nCompany: {company_name}\nPersona: {audience_persona}\nMessaging: {core_messaging}\nImages: {generated_assets}\n\n"
+            "Generate 3 sections:\n"
+            "<section id=\"home\">Hero with webinar_banner_url image + value proposition</section>\n"
+            "<section id=\"about\">Problem/Solution based on pain_point</section>\n"
+            "<section id=\"contact\">Who is this for (descriptive only)</section>"
         ),
     ]
 )
-web_agent_chain = web_agent_prompt | llm | StrOutputParser()
-print("--- 🕸️  Web Agent LCEL Chain Compiled ---")
+
+web_sections_chain = web_sections_prompt | llm2 | StrOutputParser()
+print("--- 🕸️  Web Agent LCEL Chain Compiled (Sections + Hardcoded Boilerplate) ---")
+
+
+def _extract_body_like_html(raw: str) -> str:
+    """Best-effort extraction if an LLM accidentally returns full HTML."""
+    if not raw:
+        return ""
+
+    # Strip markdown code fences the LLM might wrap output in
+    text = raw.strip()
+    if text.startswith("```"):
+        first_nl = text.find("\n")
+        if first_nl != -1:
+            text = text[first_nl + 1:]
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3]
+    raw = text.strip()
+
+    lower = raw.lower()
+    if (
+        "<section" in lower
+        and "id=\"home\"" in lower
+        and "id=\"about\"" in lower
+        and "id=\"contact\"" in lower
+    ):
+        return raw.strip()
+
+    # Try to pull content inside <body>...</body>
+    body_start = lower.find("<body")
+    if body_start != -1:
+        body_tag_end = lower.find(">", body_start)
+        body_end = lower.rfind("</body>")
+        if body_tag_end != -1 and body_end != -1 and body_end > body_tag_end:
+            return raw[body_tag_end + 1:body_end].strip()
+
+    return raw.strip()
+
+
+def build_landing_page_html(*, company_name: str, sections_html: str) -> str:
+    year = datetime.now().year
+    safe_company = (company_name or "Company").strip() or "Company"
+    footer_text = f"© {safe_company}.{year}.generated with PROMETHEON."
+
+    return f"""<!doctype html>
+<html lang=\"en\">
+<head>
+    <meta charset=\"utf-8\" />
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <title>{safe_company}</title>
+    <style>
+        :root {{
+            --bg: #0b1020;
+            --panel: rgba(255,255,255,0.06);
+            --text: rgba(255,255,255,0.92);
+            --muted: rgba(255,255,255,0.70);
+            --border: rgba(255,255,255,0.12);
+            --accent: #8b5cf6;
+            --accent2: #ec4899;
+            --max: 1040px;
+        }}
+        * {{ box-sizing: border-box; }}
+        html {{ scroll-behavior: smooth; }}
+        body {{
+            margin: 0;
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+            background: radial-gradient(1200px 700px at 20% 0%, rgba(139,92,246,0.28), transparent 60%),
+                                    radial-gradient(900px 600px at 90% 10%, rgba(236,72,153,0.20), transparent 55%),
+                                    var(--bg);
+            color: var(--text);
+            line-height: 1.55;
+        }}
+        a {{ color: inherit; text-decoration: none; }}
+        .container {{ max-width: var(--max); margin: 0 auto; padding: 0 20px; }}
+
+        /* Sticky navbar */
+        .nav {{
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            backdrop-filter: blur(10px);
+            background: rgba(11,16,32,0.72);
+            border-bottom: 1px solid var(--border);
+        }}
+        .nav-inner {{ display: flex; align-items: center; justify-content: space-between; height: 64px; }}
+        .brand {{ font-weight: 800; letter-spacing: 0.2px; }}
+        .links {{ display: flex; gap: 16px; }}
+        .links a {{
+            padding: 8px 10px;
+            border-radius: 10px;
+            color: var(--muted);
+        }}
+        .links a:hover {{ background: rgba(255,255,255,0.06); color: var(--text); }}
+
+        /* Sections */
+        main {{ padding: 24px 0 44px; }}
+        section {{
+            scroll-margin-top: 84px;
+            margin: 18px 0;
+            padding: 28px;
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            background: var(--panel);
+            overflow: hidden;
+        }}
+        h1,h2,h3 {{ margin: 0 0 12px; line-height: 1.15; }}
+        p {{ margin: 0 0 12px; color: var(--muted); }}
+        img {{ max-width: 100%; border-radius: 14px; border: 1px solid var(--border); display: block; }}
+
+        /* Footer (MUST be only the required line) */
+        .footer {{
+            border-top: 1px solid var(--border);
+            color: rgba(255,255,255,0.78);
+            text-align: center;
+            padding: 18px 12px;
+        }}
+    </style>
+</head>
+<body>
+    <header class=\"nav\">
+        <div class=\"container nav-inner\">
+            <div class=\"brand\">{safe_company}</div>
+            <nav class=\"links\" aria-label=\"Primary\">
+                <a href=\"#home\">Home</a>
+                <a href=\"#contact\">Contact</a>
+                <a href=\"#about\">About</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class=\"container\">
+        {sections_html}
+    </main>
+
+    <footer class=\"footer\">{footer_text}</footer>
+</body>
+</html>"""
 
 
 # --- 3.6: BRD AGENT (NEW) ---
@@ -326,7 +658,7 @@ brd_agent_prompt = ChatPromptTemplate.from_messages(
         ),
     ]
 )
-brd_agent_chain = brd_agent_prompt | llm | StrOutputParser()
+brd_agent_chain = brd_agent_prompt | llm1 | StrOutputParser()
 print("--- 📄 BRD Agent LCEL Chain Compiled ---")
 
 
@@ -348,7 +680,7 @@ strategy_agent_prompt = ChatPromptTemplate.from_messages(
         ),
     ]
 )
-strategy_agent_chain = strategy_agent_prompt | llm | StrOutputParser()
+strategy_agent_chain = strategy_agent_prompt | llm1 | StrOutputParser()
 print("--- 📈 Strategy Agent LCEL Chain Compiled ---")
 
 
@@ -381,7 +713,20 @@ def save_markdown_as_pdf(markdown_text: str, filename: str) -> str:
         return "error_saving_pdf.pdf"
 
 def planner_agent_node(state: CampaignState) -> dict:
-    print("--- 1. 📋 Calling Planner Agent (REAL) ---")
+    print("--- 1. 📋 Calling Planner Agent ---")
+    # If fields are already populated (user confirmed an edited plan), skip LLM
+    if state.goal and state.topic and state.target_audience:
+        print("--- 📋 Planner Agent: Using pre-populated fields (user override). Skipping LLM. ---")
+        # Return the pre-populated fields so they appear in the state diff
+        return {
+            "goal": state.goal,
+            "topic": state.topic,
+            "target_audience": state.target_audience,
+            "company_name": state.company_name,
+            "source_docs_url": state.source_docs_url,
+            "campaign_date": state.campaign_date,
+            "location": state.location,
+        }
     brief = state.initial_prompt
     try:
         planner_output: PlannerOutput = planner_chain.invoke({"brief": brief})
@@ -390,19 +735,500 @@ def planner_agent_node(state: CampaignState) -> dict:
         print(f"--- ❌ ERROR in Planner Agent: {e} ---")
         return {}
 
-def research_agent_node(state: CampaignState) -> dict:
-    print("--- 2. 🧠 Calling Research Agent (REAL) ---")
-    inputs = {"topic": state.topic, "target_audience": state.target_audience}
+# --- KNOWN COUNTRY PORTALS (Tier 1 lookup) ---
+KNOWN_COUNTRY_PORTALS = {
+    "united states": "https://www.sba.gov/business-guide/launch-your-business",
+    "usa": "https://www.sba.gov/business-guide/launch-your-business",
+    "united kingdom": "https://www.gov.uk/set-up-business",
+    "uk": "https://www.gov.uk/set-up-business",
+    "canada": "https://ised-isde.canada.ca/site/corporations-canada/en",
+    "australia": "https://business.gov.au/registrations",
+    "india": "https://www.startupindia.gov.in",
+    "germany": "https://www.existenzgruender.de/EN/Home/inhalt.html",
+    "france": "https://www.guichet-entreprises.fr/en/",
+    "singapore": "https://www.acra.gov.sg",
+    "uae": "https://www.economy.gov.ae/english/pages/default.aspx",
+    "south africa": "https://www.cipc.co.za",
+    "nigeria": "https://www.cac.gov.ng",
+    "kenya": "https://brs.go.ke",
+    "brazil": "https://www.gov.br/empresas-e-negocios/pt-br",
+    "japan": "https://www.moj.go.jp/ENGLISH/",
+    "egypt": "https://www.gafi.gov.eg",
+    "morocco": "https://www.invest.gov.ma",
+}
+print(f"--- 🌍 Loaded {len(KNOWN_COUNTRY_PORTALS)} known country portals ---")
+
+
+def resolve_jurisdiction_from_portal(portal_url: str, country: str, topic: str):
+    print(f"--- Portal scrape: {portal_url} ---")
     try:
-        if state.source_docs_url:
-            print(f"--- ⚠️ source_docs_url provided, but IGNORING IT to avoid token limits. ---")
-        print("--- 🔎 Running search-only research chain... ---")
-        research_output: ResearchOutput = research_search_only_chain.invoke(inputs)
-        return research_output.model_dump()
+        docs = WebBaseLoader(portal_url).load()
+        content = docs[0].page_content[:4000] if docs else ""
+    except:
+        return None
+
+    if not content.strip():
+        return None
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system",
+         "Task: From this government portal content, find the ONE agency that handles business/startup/company registration. "
+         "Return JSON only (name + real URL). Do not hallucinate.\n{format_instructions}"),
+        ("human",
+         "Country: {country}\nTopic: {topic}\n\nCONTENT:\n{content}")
+    ]).partial(format_instructions=jurisdiction_parser.get_format_instructions())
+
+    try:
+        chain = prompt | llm0 | jurisdiction_parser
+        r = chain.invoke({"country": country, "topic": topic, "content": content})
+        if r.department_url not in ("", "N/A", "Unknown"):
+            return r
+    except Exception as e:
+        print("Portal LLM fail:", e)
+    return None
+
+
+def search_jurisdiction_fallback_with_extract(country: str, topic: str, company_name: str):
+    print(f"--- Fallback search: {country} ---")
+    try:
+        search = tavily_tool.invoke(
+            f"official agency for business/startup/company registration in {country} {topic}"
+        )
+    except Exception as e:
+        print("Tavily fail:", e)
+        return None
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system",
+         "Task: Use search results to identify the correct real government department for company/startup registration. "
+         "Return JSON only.\n{format_instructions}"),
+        ("human",
+         "Country: {country}\nTopic: {topic}\nCompany: {company_name}\nSearch:\n{search_results}")
+    ]).partial(format_instructions=jurisdiction_parser.get_format_instructions())
+
+    try:
+        chain = prompt | llm0 | jurisdiction_parser
+        r = chain.invoke({
+            "country": country,
+            "topic": topic,
+            "company_name": company_name,
+            "search_results": str(search)
+        })
+        if r.department_url not in ("", "Unknown", "N/A"):
+            return r
+    except Exception as e:
+        print("Fallback LLM fail:", e)
+
+    return None
+
+
+def finalize_jurisdiction(country: str, topic: str, company_name: str):
+    country_key = (country or "").lower()
+
+    # Tier 1: Known portal
+    portal = next((u for k, u in KNOWN_COUNTRY_PORTALS.items() if k in country_key), None)
+    if portal:
+        j = resolve_jurisdiction_from_portal(portal, country, topic)
+        if j:
+            return j
+        print("Portal failed → fallback")
+
+    # Tier 2: Search fallback
+    j = search_jurisdiction_fallback_with_extract(country, topic, company_name)
+    if j:
+        return j
+
+    print("❌ No jurisdiction found")
+    return None
+
+
+def jurisdiction_agent_node(state: CampaignState) -> dict:
+    """Step 3 in user flow: discover jurisdiction & ministries, scrape procedures."""
+    print("--- 2. 🏛️ Calling Jurisdiction Agent ---")
+    location = state.location or ""
+    topic = state.topic or ""
+    company_name = state.company_name or ""
+    campaign_date = state.campaign_date.isoformat() if state.campaign_date else ""
+
+    result = {}
+
+    if not location:
+        print("--- ⚠️ No location provided — skipping jurisdiction discovery ---")
+        result["jurisdiction_info"] = {
+            "department_name": "N/A",
+            "department_url": "",
+            "jurisdiction_type": "N/A"
+        }
+        result["registration_procedure"] = []
+        return result
+
+    try:
+        # ========================================
+        # STEP 1: Jurisdiction Discovery
+        # ========================================
+        print(f"--- STEP 1: Jurisdiction for {location} ({topic}) ---")
+        jurisdiction = finalize_jurisdiction(location, topic, company_name)
+
+        if jurisdiction:
+            result["jurisdiction_info"] = jurisdiction.model_dump()
+            print(f"--- ✅ STEP 1 resolved → {jurisdiction.department_name} ---")
+        else:
+            result["jurisdiction_info"] = {
+                "department_name": "Unknown",
+                "department_url": "",
+                "jurisdiction_type": "Unknown"
+            }
+            result["registration_procedure"] = []
+            print(f"--- ❌ STEP 1 unresolved for {location} ---")
+            return result
+
+        # ========================================
+        # STEP 2: Scrape Department Website + Extract Procedure
+        # ========================================
+        if jurisdiction.department_url:
+            print(f"--- 📋 STEP 2: Reading department website: {jurisdiction.department_url} ---")
+            website_content, raw_govt_content = _scrape_govt_website(jurisdiction.department_url)
+            result["raw_govt_content"] = raw_govt_content   # save full scrape to state for validation
+
+            try:
+                procedure_search = tavily_tool.invoke(
+                    f"how to register startup company at {jurisdiction.department_name} {location} "
+                    f"step by step procedure requirements {campaign_date}"
+                )
+                procedure_inputs = {
+                    "department_name": jurisdiction.department_name,
+                    "department_url": jurisdiction.department_url,
+                    "location": location,
+                    "topic": topic,
+                    "website_content": website_content,
+                    "procedure_search": procedure_search,
+                }
+                procedure_chain = procedure_prompt | llm0 | procedure_parser
+                procedure_output = procedure_chain.invoke(procedure_inputs)
+                result["registration_procedure"] = procedure_output.registration_steps
+                print(f"--- 📋 Extracted {len(procedure_output.registration_steps)} registration steps ---")
+            except Exception as e:
+                print(f"--- ⚠️ STEP 2 failed (procedure extraction): {e} ---")
+                result["registration_procedure"] = []
+
+        print(f"--- ✅ Jurisdiction Agent Complete ---")
+        return result
+
+    except Exception as e:
+        print(f"--- ❌ ERROR in Jurisdiction Agent: {e} ---")
+        pprint.pprint(e)
+        return result if result else {}
+
+
+def _scrape_govt_website(url: str) -> tuple:
+    """
+    Scrape the government website and return (truncated_content, full_raw_content).
+    Always returns at least empty strings — never raises.
+    """
+    raw = ""
+    try:
+        loader = WebBaseLoader(url)
+        docs = loader.load()
+        if docs:
+            raw = docs[0].page_content
+            print(f"--- 📋 Scraped {len(raw)} chars from govt website ---")
+    except Exception as e:
+        print(f"--- ⚠️ Could not scrape {url}: {e} ---")
+    truncated = raw[:4000] if raw else "Could not load website."
+    return truncated, raw
+
+
+def research_agent_node(state: CampaignState) -> dict:
+    """Step 4a: Audience research + required documents (uses jurisdiction from previous step)."""
+    print("--- 3. 🧠 Calling Research Agent ---")
+    location = state.location or ""
+    topic = state.topic or ""
+    target_audience = state.target_audience or ""
+    campaign_date = state.campaign_date.isoformat() if state.campaign_date else ""
+
+    # Pull jurisdiction data from state (set by jurisdiction_agent)
+    jurisdiction_info = state.jurisdiction_info or {}
+    department_name = jurisdiction_info.get("department_name", "N/A")
+    department_url = jurisdiction_info.get("department_url", "N/A")
+    registration_steps = state.registration_procedure or []
+
+    result = {}
+
+    # Build correction note from previous validation round (if any)
+    correction_note = ""
+    if state.validation_mismatches:
+        correction_note = (
+            "\n\n⚠️ CORRECTION REQUIRED (from validation audit round "
+            f"{state.validation_rounds}):\n"
+            + "\n".join(f"  - {m}" for m in state.validation_mismatches)
+            + "\n\nPlease fix ALL of the above issues in this revised output. "
+              "Do not repeat the errors listed."
+        )
+
+    try:
+        print("--- 🔎 Running full research chain (audience + documents) ---")
+
+        search_results = tavily_tool.invoke(
+            f"common pain points for {target_audience} related to {topic}"
+        )
+
+        regulatory_news = ""
+        if location:
+            regulatory_news = tavily_tool.invoke(
+                f"latest regulatory changes startup business registration {location} {campaign_date} news"
+            )
+
+        # Use the raw govt website content scraped by jurisdiction_agent as
+        # primary product context. This ensures the LLM can extract the actual
+        # documents and steps listed on the official government site.
+        raw_govt = state.raw_govt_content or ""
+        if raw_govt:
+            scraped_content = (
+                "=== OFFICIAL GOVERNMENT WEBSITE CONTENT (use as primary source for documents) ===\n"
+                + raw_govt[:6000]
+            )
+            print(f"--- 📄 Feeding {len(raw_govt[:6000])} chars of govt content to research LLM ---")
+        else:
+            scraped_content = "No government website content available."
+        if correction_note:
+            scraped_content += correction_note
+
+        research_inputs = {
+            "scraped_content": scraped_content,
+            "topic": topic,
+            "target_audience": target_audience,
+            "search_results": search_results,
+            "department_name": department_name,
+            "department_url": department_url,
+            "registration_procedure": "\n".join(f"{i+1}. {s}" for i, s in enumerate(registration_steps)) if registration_steps else "No procedure available.",
+            "location": location,
+            "campaign_date": campaign_date,
+            "regulatory_news": str(regulatory_news) if regulatory_news else "No recent news.",
+        }
+
+        research_chain = research_prompt | llm0 | research_parser
+        research_output: ResearchOutput = research_chain.invoke(research_inputs)
+        research_dict = research_output.model_dump()
+
+        result["audience_persona"] = research_dict["audience_persona"]
+        result["core_messaging"] = research_dict["core_messaging"]
+
+        if 'required_documents' in research_dict and research_dict['required_documents']:
+            result['required_documents'] = [
+                doc if isinstance(doc, dict) else doc.model_dump()
+                for doc in research_dict['required_documents']
+            ]
+        else:
+            result['required_documents'] = []
+
+        # Fallback: If no documents were generated but we have raw govt
+        # content, ask the LLM for a quick extraction so we never return 0
+        # documents when the govt site clearly lists requirements.
+        if not result['required_documents'] and state.raw_govt_content and location:
+            print("--- ⚠️ Zero documents from research LLM — attempting fallback extraction ---")
+            try:
+                fallback_chain = ChatPromptTemplate.from_messages([
+                    ("system",
+                     "Extract every required document, licence, permit, or registration form "
+                     "mentioned in the government website text below. Return ONLY valid JSON "
+                     "matching this schema:\n\n{format_instructions}"),
+                    ("human",
+                     "Government website text:\n{govt_text}\n\n"
+                     "Country: {location}\nStartup type: {topic}")
+                ]).partial(format_instructions=research_parser.get_format_instructions())
+                fallback_output = (fallback_chain | llm0 | research_parser).invoke({
+                    "govt_text": state.raw_govt_content[:5000],
+                    "location": location,
+                    "topic": topic,
+                })
+                fallback_docs = fallback_output.model_dump().get("required_documents", [])
+                if fallback_docs:
+                    result['required_documents'] = [
+                        doc if isinstance(doc, dict) else doc.model_dump()
+                        for doc in fallback_docs
+                    ]
+                    print(f"--- ✅ Fallback extraction recovered {len(result['required_documents'])} documents ---")
+            except Exception as fb_err:
+                print(f"--- ❌ Fallback extraction failed: {fb_err} ---")
+
+        print(f"--- ✅ Research Agent Complete: {len(result.get('required_documents', []))} documents found ---")
+        return result
+
     except Exception as e:
         print(f"--- ❌ ERROR in Research Agent: {e} ---")
-        pprint.pprint(e) 
-        return {} 
+        pprint.pprint(e)
+        return result if result else {}
+
+
+def validation_agent_node(state: CampaignState) -> dict:
+    """
+    Cross-validates registration steps and required documents against:
+      1. The raw govt website content (always treated as ground truth).
+      2. Fresh web searches via Tavily (2-3 targeted queries).
+
+    Returns confidence scores, mismatches, and a flag for govt-only fallback.
+    Never raises — always returns a safe dict so the graph can continue.
+    """
+    print(f"--- 🔍 Validation Agent — round {(state.validation_rounds or 0) + 1}/{MAX_VALIDATION_ROUNDS} ---")
+
+    result: dict = {
+        "validation_rounds": (state.validation_rounds or 0) + 1,
+    }
+
+    location    = state.location or ""
+    topic       = state.topic    or ""
+    raw_content = state.raw_govt_content or ""
+    steps       = state.registration_procedure or []
+    docs        = state.required_documents or []
+
+    # Failsafe A: nothing to validate
+    if not steps and not docs:
+        print("--- ⚠️ Validation: no steps or docs to check — skipping ---")
+        result["govt_fallback_only"] = bool(raw_content)
+        result["overall_confidence"] = 0.0
+        result["validation_mismatches"] = ["No registration steps or documents were generated."]
+        return result
+
+    # Failsafe B: no raw govt content — lower confidence ceiling
+    if not raw_content:
+        print("--- ⚠️ Validation: no raw govt content — web-search only mode ---")
+        raw_content = "Government website could not be scraped. Use web search results as reference."
+
+    # Step 1: 2-3 targeted Tavily searches
+    web_search_results = ""
+    search_queries = [
+        f"{topic} company registration official requirements {location}",
+        f"required documents {topic} startup registration {location}",
+    ]
+    if docs:
+        first_doc = docs[0].get("document_name", "") if isinstance(docs[0], dict) else str(docs[0])
+        if first_doc:
+            search_queries.append(f'"{first_doc}" {location} official registration')
+
+    for query in search_queries:
+        try:
+            result_chunk = tavily_tool.invoke(query)
+            web_search_results += f"\n--- Query: {query} ---\n{result_chunk}\n"
+        except Exception as e:
+            print(f"--- ⚠️ Tavily search failed for '{query}': {e} ---")
+
+    # Step 2: Format inputs for validation LLM
+    steps_formatted = "\n".join(
+        f"{i}. {s}" for i, s in enumerate(steps)
+    ) or "No steps provided."
+
+    docs_formatted = "\n".join(
+        f"  • {d.get('document_name','?')} — Issuing authority: {d.get('issuing_authority','?')}"
+        if isinstance(d, dict) else f"  • {d}"
+        for d in docs
+    ) or "No documents provided."
+
+    # Step 3: Call validation LLM
+    try:
+        validation_output: ValidationOutput = validation_chain.invoke({
+            "raw_govt_content":   raw_content,
+            "registration_steps": steps_formatted,
+            "required_documents": docs_formatted,
+            "web_search_results": web_search_results or "No web results retrieved.",
+            "location":           location,
+            "topic":              topic,
+        })
+
+        print(
+            f"--- ✅ Validation complete: confidence={validation_output.overall_confidence:.2f}, "
+            f"validated={validation_output.is_validated}, "
+            f"mismatches={len(validation_output.mismatches)} ---"
+        )
+
+        result["step_confidence"]     = validation_output.step_confidence
+        result["document_confidence"] = validation_output.document_confidence
+        result["overall_confidence"]  = validation_output.overall_confidence
+        result["validation_mismatches"] = (
+            validation_output.mismatches
+            + [f"Missing doc: {d}" for d in validation_output.missing_docs]
+            + [f"Missing step: {s}" for s in validation_output.missing_steps]
+        )
+
+        # Append missing documents discovered by validation back into
+        # required_documents so they appear in the UI even if the research
+        # LLM omitted them.  These are documents the govt website lists
+        # that the AI never generated.
+        existing_doc_names = {
+            (d.get("document_name", "") if isinstance(d, dict) else str(d)).lower()
+            for d in docs
+        }
+        new_docs = list(docs)  # shallow copy
+        for doc_name in validation_output.missing_docs:
+            if doc_name.lower() not in existing_doc_names:
+                new_docs.append({
+                    "document_name": doc_name,
+                    "issuing_authority": "See official government website",
+                    "purpose": "Listed on the official government registration page but not generated by AI research.",
+                    "deadline_note": "Check official website for deadline",
+                })
+                print(f"--- 📎 Added missing doc from validation: {doc_name} ---")
+        if len(new_docs) > len(docs):
+            result["required_documents"] = new_docs
+            # Also give the newly-added docs a low confidence score
+            for doc_name in validation_output.missing_docs:
+                if doc_name not in result["document_confidence"]:
+                    result["document_confidence"][doc_name] = 0.5
+
+        # Failsafe C: catastrophic confidence + no govt content
+        if validation_output.overall_confidence < 0.3 and not state.raw_govt_content:
+            print("--- ❌ Confidence critically low and no govt scrape — activating fallback ---")
+            result["govt_fallback_only"] = True
+        else:
+            result["govt_fallback_only"] = False
+
+    except Exception as e:
+        print(f"--- ❌ Validation LLM failed: {e} — defaulting to neutral confidence ---")
+        result["step_confidence"]     = {str(i): 0.6 for i in range(len(steps))}
+        result["document_confidence"] = {
+            (d.get("document_name", f"doc_{i}") if isinstance(d, dict) else f"doc_{i}"): 0.6
+            for i, d in enumerate(docs)
+        }
+        result["overall_confidence"]  = 0.6
+        result["validation_mismatches"] = []
+        result["govt_fallback_only"]  = False
+
+    return result
+
+
+def route_after_validation(state: CampaignState) -> str:
+    """
+    Conditional router after validation_agent.
+
+    Loop back to research_agent if:
+      - Confidence is below threshold, AND
+      - We haven't hit the max re-validation rounds, AND
+      - There are actual mismatches to correct.
+
+    Otherwise: proceed to strategy_agent (even if imperfect — govt scrape is the safety net).
+    """
+    rounds      = state.validation_rounds or 0
+    confidence  = state.overall_confidence if state.overall_confidence is not None else 1.0
+    mismatches  = state.validation_mismatches or []
+
+    needs_rerun = (
+        confidence < CONFIDENCE_THRESHOLD
+        and rounds < MAX_VALIDATION_ROUNDS
+        and len(mismatches) > 0
+    )
+
+    if needs_rerun:
+        print(
+            f"--- 🔄 Routing back to research_agent "
+            f"(conf={confidence:.2f}, round={rounds}/{MAX_VALIDATION_ROUNDS}) ---"
+        )
+        return "research_agent"
+
+    if state.govt_fallback_only:
+        print("--- 🏛️  Govt fallback mode active — proceeding with raw scrape only ---")
+
+    print(f"--- ➡️  Routing to strategy_agent (conf={confidence:.2f}, round={rounds}) ---")
+    return "strategy_agent"
+
 
 def content_agent_node(state: CampaignState) -> dict:
     print("--- 4. ✍️ Calling Content Agent (REAL) ---")
@@ -433,7 +1259,7 @@ def design_agent_node(state: CampaignState) -> dict:
     generated_assets = {}
     
     print("--- 🎨 Generating Webinar Banner... ---")
-    generated_assets["webinar_banner_url"] = get_unsplash_image(state.webinar_image_prompt)
+    generated_assets["webinar_banner_url"] = get_unsplash_image(state.webinar_image_prompt or state.topic or "abstract")
     
     for i, post in enumerate(state.social_posts):
         print(f"--- 🎨 Generating image for social post {i+1} ({post.platform})... ---")
@@ -451,20 +1277,21 @@ def web_agent_node(state: CampaignState) -> dict:
     print("--- 6. 🕸️ Calling Web Agent (REAL) ---")
     
     try:
+        company_name = state.company_name or state.topic or "Company"
         inputs = {
             "topic": state.topic,
             "audience_persona": state.audience_persona,
             "core_messaging": state.core_messaging,
-            "generated_assets": state.generated_assets
+            "company_name": company_name,
+            "generated_assets": state.generated_assets,
         }
-        
-        print("--- 🕸️ Generating HTML code based on research (full autonomy)... ---")
-        html_code = web_agent_chain.invoke(inputs)
-        
-        return {
-            "landing_page_code": html_code,
-            "landing_page_url": "campaign_preview.html"
-        }
+
+        print("--- 🕸️ Generating landing page sections (LLM) + wrapping boilerplate... ---")
+        sections_raw = web_sections_chain.invoke(inputs)
+        sections_html = _extract_body_like_html(sections_raw)
+        html_code = build_landing_page_html(company_name=company_name, sections_html=sections_html)
+
+        return {"landing_page_code": html_code, "landing_page_url": "campaign_preview.html"}
 
     except Exception as e:
         print(f"--- ❌ ERROR in Web Agent: {e} ---")
@@ -489,7 +1316,8 @@ def brd_agent_node(state: CampaignState) -> dict:
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
             
-        filename = f"{output_dir}/{state.topic.lower().replace(' ', '_')}_brd.pdf"
+        topic_slug = (state.topic or "campaign").lower().replace(' ', '_')
+        filename = f"{output_dir}/{topic_slug}_brd.pdf"
         pdf_path = save_markdown_as_pdf(brd_markdown, filename)
         
         return {"brd_url": pdf_path}
@@ -631,29 +1459,44 @@ def ops_agent_node(state: CampaignState) -> dict:
 graph_builder = StateGraph(CampaignState)
 
 # Add all nodes
-graph_builder.add_node("planner_agent", planner_agent_node)
-graph_builder.add_node("research_agent", research_agent_node)
-graph_builder.add_node("content_agent", content_agent_node)
-graph_builder.add_node("design_agent", design_agent_node)
-graph_builder.add_node("web_agent", web_agent_node)
-graph_builder.add_node("brd_agent", brd_agent_node) 
-graph_builder.add_node("strategy_agent", strategy_agent_node) # <-- Name is the same
-graph_builder.add_node("ops_agent", ops_agent_node)
+graph_builder.add_node("planner_agent",      planner_agent_node)
+graph_builder.add_node("jurisdiction_agent",  jurisdiction_agent_node)
+graph_builder.add_node("research_agent",      research_agent_node)
+graph_builder.add_node("validation_agent",    validation_agent_node)   # ← NEW
+graph_builder.add_node("content_agent",       content_agent_node)
+graph_builder.add_node("design_agent",        design_agent_node)
+graph_builder.add_node("web_agent",           web_agent_node)
+graph_builder.add_node("brd_agent",           brd_agent_node)
+graph_builder.add_node("strategy_agent",      strategy_agent_node)
+graph_builder.add_node("ops_agent",           ops_agent_node)
 
-# Add all edges (sequential flow)
+# Linear flow up to validation
 graph_builder.set_entry_point("planner_agent")
-graph_builder.add_edge("planner_agent", "research_agent")
-graph_builder.add_edge("research_agent", "strategy_agent")  # Strategy runs right after research
+graph_builder.add_edge("planner_agent",      "jurisdiction_agent")
+graph_builder.add_edge("jurisdiction_agent", "research_agent")
+graph_builder.add_edge("research_agent",     "validation_agent")    # ← NEW
+
+# Conditional loop: validation → research_agent (retry) OR strategy_agent (proceed)
+graph_builder.add_conditional_edges(
+    "validation_agent",
+    route_after_validation,
+    {
+        "research_agent":  "research_agent",   # re-run with corrections
+        "strategy_agent":  "strategy_agent",   # proceed
+    }
+)
+
+# Remainder of pipeline unchanged
 graph_builder.add_edge("strategy_agent", "content_agent")
-graph_builder.add_edge("content_agent", "design_agent")
-graph_builder.add_edge("design_agent", "web_agent")
-graph_builder.add_edge("web_agent", "brd_agent") 
-graph_builder.add_edge("brd_agent", "ops_agent") 
-graph_builder.add_edge("ops_agent", END)
+graph_builder.add_edge("content_agent",  "design_agent")
+graph_builder.add_edge("design_agent",   "web_agent")
+graph_builder.add_edge("web_agent",      "brd_agent")
+graph_builder.add_edge("brd_agent",      "ops_agent")
+graph_builder.add_edge("ops_agent",      END)
 
 
 # Compile the graph
-print("--- 🏭 Compiling AI Campaign Foundry Graph (Sequential) ---")
+print("--- 🏭 Compiling AI Campaign Foundry Graph (with Validation Loop) ---")
 sys.setrecursionlimit(200) 
 foundry_app = graph_builder.compile()
 print("--- ✅ Foundry Graph Compiled ---")
@@ -668,14 +1511,79 @@ app = FastAPI()
 # Add CORS middleware to allow frontend requests
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],  # Vite default port
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://127.0.0.1:5174"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all methods (GET, POST, OPTIONS, etc.)
-    allow_headers=["*"],  # Allow all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+
+class InferPlanRequest(BaseModel):
+    initial_prompt: str
 
 class StreamRequest(BaseModel):
     initial_prompt: str
+    # Optional planner overrides — if provided, planner agent will use these instead of LLM
+    goal: Optional[str] = None
+    topic: Optional[str] = None
+    target_audience: Optional[str] = None
+    company_name: Optional[str] = None
+    source_docs_url: Optional[str] = None
+    campaign_date: Optional[str] = None
+    location: Optional[str] = None
+
+
+
+class RegenerateWebRequest(BaseModel):
+    topic: Optional[str] = None
+    goal: Optional[str] = None
+    audience_persona: Optional[Dict[str, str]] = None
+    core_messaging: Optional[Dict[str, str]] = None
+    generated_assets: Optional[Dict[str, str]] = None
+    company_name: Optional[str] = None
+
+
+# Separate LLM with temperature for regeneration variety
+regen_llm = ChatGroq(model_name="openai/gpt-oss-20b", temperature=0.9, api_key=_grok_key2)
+print(f"--- 🤖 Regen LLM (Key 2) Initialized ---")
+regen_sections_chain = web_sections_prompt | regen_llm | StrOutputParser()
+
+
+@app.post("/regenerate_landing_page")
+async def regenerate_landing_page(request: RegenerateWebRequest):
+    """Regenerate the landing page HTML by calling the Web Agent only."""
+    try:
+        company_name = request.company_name or request.topic or "Company"
+        inputs = {
+            "topic": request.topic or "",
+            "audience_persona": request.audience_persona or {},
+            "core_messaging": request.core_messaging or {},
+            "company_name": company_name,
+            "generated_assets": request.generated_assets or {},
+        }
+
+        sections_raw = regen_sections_chain.invoke(inputs)
+        sections_html = _extract_body_like_html(sections_raw)
+        html_code = build_landing_page_html(company_name=company_name, sections_html=sections_html)
+        return {"success": True, "html": html_code}
+
+    except Exception as e:
+        print(f"--- ❌ ERROR regenerating landing page: {e} ---")
+        return {"success": False, "error": str(e)}
+
+@app.post("/infer_plan")
+async def infer_plan(request: InferPlanRequest):
+    """Run only the planner agent to infer a business plan from the prompt."""
+    try:
+        planner_output: PlannerOutput = planner_chain.invoke({"brief": request.initial_prompt})
+        result = planner_output.model_dump()
+        # Convert datetime to string for JSON serialization
+        if result.get("campaign_date"):
+            result["campaign_date"] = result["campaign_date"].isoformat() if hasattr(result["campaign_date"], 'isoformat') else str(result["campaign_date"])
+        return {"success": True, "plan": result}
+    except Exception as e:
+        print(f"--- ❌ ERROR in /infer_plan: {e} ---")
+        return {"success": False, "error": str(e)}
+
 
 @app.websocket("/ws_stream_campaign")
 async def websocket_endpoint(websocket: WebSocket):
@@ -687,29 +1595,45 @@ async def websocket_endpoint(websocket: WebSocket):
         
         initial_input = {"initial_prompt": request_data.initial_prompt}
         
+        # If planner overrides are provided, pre-populate the state
+        if request_data.goal:
+            initial_input["goal"] = request_data.goal
+        if request_data.topic:
+            initial_input["topic"] = request_data.topic
+        if request_data.target_audience:
+            initial_input["target_audience"] = request_data.target_audience
+        if request_data.company_name:
+            initial_input["company_name"] = request_data.company_name
+        if request_data.source_docs_url:
+            initial_input["source_docs_url"] = request_data.source_docs_url
+        if request_data.campaign_date:
+            try:
+                initial_input["campaign_date"] = datetime.fromisoformat(request_data.campaign_date)
+            except Exception:
+                pass
+        if request_data.location:
+            initial_input["location"] = request_data.location
+        
         current_state_dict = initial_input.copy()
         
         print(f"--- 🚀 Received input, starting stream... ---")
         
         async for s in foundry_app.astream(initial_input):
             node_that_ran = list(s.keys())[0]
-            state_snapshot_diff = s[node_that_ran] # This is a dict
-            
+            state_snapshot_diff = s[node_that_ran]  # Dict of only the fields this node changed
+
             if state_snapshot_diff:
+                # Always replace — never mutate. extend/update would corrupt lists and dicts
                 for key, value in state_snapshot_diff.items():
-                    if isinstance(value, list) and key in current_state_dict:
-                        current_state_dict[key].extend(value)
-                    elif isinstance(value, dict) and key in current_state_dict:
-                        current_state_dict[key].update(value)
-                    else:
-                        current_state_dict[key] = value
-            
-            state_json = CampaignState.model_validate(current_state_dict).model_dump_json(indent=2)
-            
+                    current_state_dict[key] = value
+
+            # model_dump() returns a plain dict — NOT a string.
+            state_dict = CampaignState.model_validate(current_state_dict).model_dump(mode="json")
+
             await websocket.send_json({
                 "event": "step",
                 "node": node_that_ran,
-                "data": state_json
+                "data": state_dict   # plain dict → frontend receives a proper object
             })
             
         await websocket.send_json({"event": "done"})

@@ -251,7 +251,7 @@ function Hero() {
       />
 
       <div className="relative z-10 container mx-auto text-center">
-        <div className="mb-10 relative">
+        <div className="mb-10 relative flex items-center justify-center" style={{ minHeight: '14rem' }}>
           {/* Background big heading */}
           <h1
             ref={bgHeadingRef}
@@ -259,7 +259,7 @@ function Hero() {
               fontFamily: '"Bodoni Poster Compressed", serif',
               letterSpacing: '-0.02em',
             }}
-            className="text-[10rem] md:text-[10rem] lg:text-[12rem] font-bold tracking-wide absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 -z-10 bg-gradient-to-b from-[#FF9999] to-[#AA6677] bg-clip-text text-transparent"
+            className="text-[10rem] md:text-[10rem] lg:text-[12rem] font-bold tracking-wide absolute inset-0 flex items-center justify-center -z-10 bg-gradient-to-b from-[#FF9999] to-[#AA6677] bg-clip-text text-transparent"
           >
             PROMETHEO
           </h1>
@@ -270,7 +270,7 @@ function Hero() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
-            className="text-[8rem] md:text-[8rem] lg:text-[8rem] text-gray-700 relative z-10"
+            className="text-[5rem] md:text-[6rem] lg:text-[8rem] text-gray-700 relative z-10"
             style={{ fontFamily: '"Beau Rivage", cursive' }}
           >
             Build your startup with

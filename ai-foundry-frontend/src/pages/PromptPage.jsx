@@ -1,4 +1,3 @@
-// ...existing code...
 import { useEffect, useRef, useState } from "react";
 import AnimatedBackground from "../components/AnimatedBackground";
 import PromptInput from "../components/PromptInput";
@@ -11,7 +10,6 @@ const Index = () => {
   const titleRef = useRef(null);
   const subtitleRef = useRef(null);
   const navigate = useNavigate();
-  const wsRef = useRef(null);
 
   const [theme, setTheme] = useState(() => {
     try {
@@ -41,68 +39,49 @@ const Index = () => {
     try { localStorage.setItem("theme", theme); } catch {}
   }, [theme]);
 
-  useEffect(() => {
-    // Connect WebSocket on mount
-    connectWebSocket();
-
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, []);
-
   const [running, setRunning] = useState(false);
 
-  const connectWebSocket = () => {
-    try {
-      const ws = new WebSocket('ws://localhost:8000/ws_stream_campaign');
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        console.log('WebSocket connected');
-      };
-
-      ws.onclose = () => {
-        console.log('WebSocket disconnected');
-      };
-
-      ws.onerror = (err) => {
-        console.error('WebSocket error:', err);
-      };
-    } catch (e) {
-      console.error('WebSocket connection failed:', e);
-    }
-  };
-
-  // Send prompt to backend and navigate to report page
-  const sendPrompt = (text) => {
+  // Send prompt to backend planner endpoint and navigate to report page
+  const sendPrompt = async (text) => {
     const promptText = text?.trim();
     if (!promptText) return;
 
-    const ws = wsRef.current;
-
-    // Check WebSocket connection
-    if (!ws || ws.readyState === WebSocket.CLOSED) {
-      console.log('WebSocket not connected, attempting to reconnect...');
-      connectWebSocket();
-      setTimeout(() => sendPrompt(text), 1000);
-      return;
-    } else if (ws.readyState !== WebSocket.OPEN) {
-      alert('Connecting to server. Please wait a moment and try again.');
-      return;
-    }
-
     setRunning(true);
 
-    // Send prompt to backend
-    ws.send(JSON.stringify({ initial_prompt: promptText }));
-    console.log('Prompt sent to backend:', promptText);
+    try {
+      // Run planner inference and IP geolocation in parallel
+      const [planRes, geoRes] = await Promise.allSettled([
+        fetch('http://localhost:8000/infer_plan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ initial_prompt: promptText })
+        }).then(r => r.json()),
+        fetch('https://ipapi.co/json/').then(r => r.json())
+      ]);
 
-    // Navigate to report page with the prompt
-    setTimeout(() => {
-      navigate('/workflow', { state: { prompt: promptText, autoStart: true } });
-    }, 300);
+      const planData = planRes.status === 'fulfilled' && planRes.value.success ? planRes.value.plan : null;
+      const geo = geoRes.status === 'fulfilled' ? geoRes.value : {};
+      const userLocation = `${geo.country_name || ''}`.replace(/^,\s*|,\s*$/g, '').replace(/,\s*,/g, ', ').trim() || 'Unknown';
+
+      if (!planData) {
+        alert('Failed to infer business plan. Please try again.');
+        setRunning(false);
+        return;
+      }
+
+      // Navigate to report page with inferred plan (no agents started yet)
+      navigate('/workflow', {
+        state: {
+          prompt: promptText,
+          inferredPlan: { ...planData, location: userLocation },
+          userLocation
+        }
+      });
+    } catch (err) {
+      console.error('sendPrompt error:', err);
+      alert('Something went wrong. Please try again.');
+      setRunning(false);
+    }
   };
 
   return (
@@ -117,7 +96,7 @@ const Index = () => {
             className="font-semibold text-lg text-gray-900 dark:text-gray-100"
             title="Home"
           >
-            AI Foundry
+            PROMETHEO
           </button>
           <span className="hidden md:inline text-sm text-gray-600 dark:text-gray-300">— Build your startup</span>
         </div>
@@ -172,7 +151,7 @@ const Index = () => {
       {/* Fixed Footer */}
       <footer className="fixed bottom-0 left-0 right-0 z-40 h-12 flex items-center justify-center text-sm backdrop-blur bg-white/60 dark:bg-black/40 border-t border-gray-200/50 dark:border-gray-800/50">
         <div className="text-muted-foreground/80">
-          © {new Date().getFullYear()} AI Foundry — Generated website preview. Content is responsive and aligned.
+          © {new Date().getFullYear()} PROMETHEO. All Rights Reserved.
         </div>
       </footer>
     </div>
@@ -180,4 +159,3 @@ const Index = () => {
 };
 
 export default Index;
-// ...existing code...

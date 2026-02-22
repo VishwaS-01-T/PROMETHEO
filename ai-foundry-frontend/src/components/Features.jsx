@@ -182,9 +182,16 @@ const Features = ({ onPositionsCalculated, onAllClicked }) => {
         scrollTrigger: {
           trigger: sectionRef.current,
           start: 'top-=50vh top',
-          end: '+=900vh',
+          end: '+=300vh',
           scrub: true,
           pin: true,
+          pinSpacing: true,
+          onRefresh: (self) => {
+            // Reduce the pin spacer to pull the next section closer
+            if (self.spacer) {
+              self.spacer.style.marginBottom = '-20vh'
+            }
+          },
           onUpdate: (st) => {
             if (st.progress >= 1 && pulseTween) pulseTween.kill()
           },
@@ -256,7 +263,7 @@ const Features = ({ onPositionsCalculated, onAllClicked }) => {
     <section
       ref={sectionRef}
       id="features"
-      className="min-h-screen py-10 px-4 sm:px-6 lg:px-8 bg-white relative flex items-start"
+      className="min-h-screen pt-10 pb-2 px-4 sm:px-6 lg:px-8 bg-white relative flex items-start"
     >
       <div className="container mx-auto mt-0 relative">
         {/* DIV 1: CARDS ON TOP */}
@@ -277,7 +284,7 @@ const Features = ({ onPositionsCalculated, onAllClicked }) => {
         </div>
 
         {/* DIV 2: SVG PIPELINES (BEHIND) + SCROLL BUTTON */}
-        <div className="relative mt-8 flex flex-col items-center z-10">
+        <div className="relative mt-4 flex flex-col items-center z-10">
           <div className="absolute -top-20 left-0 right-0 flex justify-center -z-10 pointer-events-none">
             <svg viewBox="0 0 1000 220" className="w-full max-w-5xl h-52">
               {/* Base pipes (visible track) */}

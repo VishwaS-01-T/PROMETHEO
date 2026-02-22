@@ -32,12 +32,12 @@ const Footer = () => {
               href="#"
               className="text-2xl font-bold text-white mb-4 inline-block focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 rounded"
               whileHover={{ scale: 1.05 }}
-              aria-label="MindStudio Home"
+              aria-label="PROMETHEO"
             >
-              MindStudio
+              PROMETHEO
             </motion.a>
             <p className="text-gray-400 text-sm">
-              Build powerful AI agents for your startup. No coding required.
+              We don't only analyse your impact, We make it stronger.
             </p>
           </div>
 
@@ -66,7 +66,7 @@ const Footer = () => {
         {/* Bottom Bar */}
         <div className="border-t border-gray-800 pt-8 flex flex-col md:flex-row justify-between items-center">
           <p className="text-gray-400 text-sm">
-            © {currentYear} MindStudio. All rights reserved.
+            © {currentYear} PROMETHEO. All rights reserved.
           </p>
           <div className="flex space-x-6 mt-4 md:mt-0">
             <a href="#privacy" className="text-gray-400 hover:text-white transition-colors duration-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 rounded">
